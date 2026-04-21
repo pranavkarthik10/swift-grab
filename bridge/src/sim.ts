@@ -55,10 +55,17 @@ export async function detectCapabilities(): Promise<Capabilities> {
   return { idb, simctl, booted, deviceId, udid };
 }
 
-/** Capture a PNG screenshot of the booted simulator as bytes. */
-export async function screenshotPng(): Promise<Uint8Array | null> {
+export type FrameFormat = 'jpeg' | 'png';
+
+/**
+ * Capture a screenshot of the booted simulator as raw bytes. JPEG is ~30%
+ * faster to encode than PNG on simctl and the byte payload is 5-10x smaller,
+ * so it's the default for the stream. PNG stays available for anything
+ * that needs lossless (e.g. pixel-diff-based frame invalidation later).
+ */
+export async function screenshot(format: FrameFormat = 'jpeg'): Promise<Uint8Array | null> {
   try {
-    const p = Bun.spawn(['xcrun', 'simctl', 'io', 'booted', 'screenshot', '--type=png', '-'], {
+    const p = Bun.spawn(['xcrun', 'simctl', 'io', 'booted', 'screenshot', `--type=${format}`, '-'], {
       stdout: 'pipe', stderr: 'ignore',
     });
     const buf = await new Response(p.stdout).arrayBuffer();
@@ -68,21 +75,37 @@ export async function screenshotPng(): Promise<Uint8Array | null> {
   } catch { return null; }
 }
 
+/**
+ * simctl screenshots cap around 4-5 fps because the encode takes ~200ms
+ * regardless of how fast we call. The loop runs as tight as it can and
+ * only sleeps if a capture finishes quickly. `pulse()` is exposed so
+ * HID handlers can request an out-of-band frame immediately after a tap
+ * without waiting for the next loop tick.
+ */
 export function startScreenshotLoop(
   intervalMs: number,
   onFrame: (data: Uint8Array) => void,
-): () => void {
+  format: FrameFormat = 'jpeg',
+): { stop: () => void; pulse: () => void } {
   let stopped = false;
+  let wake: (() => void) | null = null;
   (async () => {
     while (!stopped) {
       const t0 = Date.now();
-      const png = await screenshotPng();
-      if (png) onFrame(png);
+      const buf = await screenshot(format);
+      if (buf) onFrame(buf);
       const dt = Date.now() - t0;
-      if (dt < intervalMs) await Bun.sleep(intervalMs - dt);
+      const wait = Math.max(0, intervalMs - dt);
+      if (wait > 0) await new Promise<void>(r => {
+        wake = () => { wake = null; r(); };
+        setTimeout(() => { if (wake) { wake = null; r(); } }, wait);
+      });
     }
   })();
-  return () => { stopped = true; };
+  return {
+    stop: () => { stopped = true; },
+    pulse: () => { wake?.(); },
+  };
 }
 
 // ---------- HID (requires idb) ----------

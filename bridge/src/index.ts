@@ -11,7 +11,8 @@ import {
 } from './sim';
 
 const PORT = Number(process.env.PORT ?? 7878);
-const FRAME_MS = Number(process.env.FRAME_MS ?? 200); // ~5 fps default
+const FRAME_MS = Number(process.env.FRAME_MS ?? 120); // min ms between frames
+const FRAME_FORMAT = (process.env.FRAME_FORMAT === 'png' ? 'png' : 'jpeg') as 'jpeg' | 'png';
 
 let caps = await detectCapabilities();
 logCaps(caps);
@@ -35,20 +36,35 @@ function broadcast(data: Uint8Array | string) {
   }
 }
 
-async function refreshAll() {
+// A snapshot refresh is ~400ms (spawn idb + gRPC). If we await it inside a
+// HID handler, the client sees that latency on every tap. Instead we
+// trigger it async and dedupe concurrent calls so rapid-fire taps don't
+// pile up a queue of stale describe-all invocations.
+let refreshInFlight: Promise<void> | null = null;
+let refreshPending = false;
+
+async function refreshAll(): Promise<void> {
   if (!caps.idb) return;
-  const snap = await captureSnapshot(caps.deviceId);
-  if (!snap) return;
-  const payload = JSON.stringify({ type: 'snapshot', data: snap } satisfies BridgeMsg);
-  broadcast(payload);
+  if (refreshInFlight) { refreshPending = true; return refreshInFlight; }
+  refreshInFlight = (async () => {
+    try {
+      const snap = await captureSnapshot(caps.deviceId);
+      if (snap) broadcast(JSON.stringify({ type: 'snapshot', data: snap } satisfies BridgeMsg));
+    } finally {
+      refreshInFlight = null;
+      if (refreshPending) { refreshPending = false; void refreshAll(); }
+    }
+  })();
+  return refreshInFlight;
 }
 
 // Frame loop (screenshot-based for v1 — swap for SimulatorKit later).
+// `pulse()` wakes the loop so HID handlers can force an immediate frame
+// after a tap instead of waiting for the next scheduled tick.
+let pulseFrames: (() => void) = () => {};
 if (caps.simctl) {
-  startScreenshotLoop(FRAME_MS, (png) => {
-    // Bun's ws.send accepts Uint8Array directly as a binary frame.
-    broadcast(png);
-  });
+  const loop = startScreenshotLoop(FRAME_MS, (buf) => broadcast(buf), FRAME_FORMAT);
+  pulseFrames = loop.pulse;
 }
 
 const server = Bun.serve({
@@ -100,22 +116,26 @@ const server = Bun.serve({
           case 'hid:tap':
             if (!caps.idb) throw new Error('idb not installed');
             await idbTap(msg.x, msg.y);
-            await refreshAll();
+            pulseFrames();              // skip the loop sleep — new frame ASAP
+            void refreshAll();          // don't block the WS ack on describe-all
             break;
           case 'hid:swipe':
             if (!caps.idb) throw new Error('idb not installed');
             await idbSwipe(msg.x1, msg.y1, msg.x2, msg.y2, msg.durationMs);
-            await refreshAll();
+            pulseFrames();
+            void refreshAll();
             break;
           case 'hid:text':
             if (!caps.idb) throw new Error('idb not installed');
             await idbText(msg.text);
-            await refreshAll();
+            pulseFrames();
+            void refreshAll();
             break;
           case 'hid:key':
             if (!caps.idb) throw new Error('idb not installed');
             await idbKey(msg.key);
-            await refreshAll();
+            pulseFrames();
+            void refreshAll();
             break;
         }
       } catch (e) {
