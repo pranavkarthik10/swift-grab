@@ -17,8 +17,8 @@ accessibility tree, which every app publishes for free.
 ```
 swift-grab/
 ├── shared/protocol.ts   # WS message types + AXNode shape
-├── web/                 # Vite + TS frontend (inspector UI)
-└── bridge/              # Bun WS server wrapping simctl + idb
+├── swift-grab-web/      # Vite + TS frontend (inspector UI)
+└── swift-grab-bridge/   # Bun WS server wrapping simctl + idb
 ```
 
 ## Quickstart
@@ -57,8 +57,16 @@ tap-injection won't work (use mock mode to try the UI).
 ## Protocol
 
 Control plane is JSON over a single WebSocket at `ws://localhost:7878/ws`.
-Binary WS messages on the same socket carry PNG frames. See
+Binary WS messages on the same socket carry JPEG frames. See
 `shared/protocol.ts` for the full message set.
+
+Environment variables for the bridge:
+
+| Var            | Default | What it does                              |
+|----------------|---------|-------------------------------------------|
+| `PORT`         | `7878`  | WebSocket port                            |
+| `FRAME_MS`     | `120`   | Min ms between screenshots (floor; simctl caps ~220ms) |
+| `FRAME_FORMAT` | `jpeg`  | `jpeg` (fast/small) or `png` (lossless)   |
 
 ## Keyboard
 
@@ -67,11 +75,3 @@ Binary WS messages on the same socket carry PNG frames. See
 | `I`        | Toggle inspect mode (hover highlights vs. pass-through tap) |
 | `Esc`      | Clear selection                                             |
 | `Cmd/Ctrl` | Freeze the current hover (drag to sidebar without losing it)|
-
-## What's next
-
-- Swap `simctl io screenshot` loop for direct `SimulatorKit` IOSurface
-  stream → VideoToolbox H.264 → MSE in the browser (60 fps vs ~5 fps)
-- Sim-only mode (no sidebar) for a clean recording/demo view
-- Expose AX elements as real DOM nodes so Cursor's built-in browser
-  element selector can pick them natively
