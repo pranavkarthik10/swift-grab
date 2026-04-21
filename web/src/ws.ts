@@ -9,6 +9,7 @@ export type FrameMeta = Extract<BridgeMsg, { type: 'frame:meta' }>;
 
 export type BridgeEvents = {
   onSnapshot?: (s: Snapshot) => void;
+  onPointInspect?: (msg: Extract<BridgeMsg, { type: 'inspect:point' }>) => void;
   onFrame?: (blob: Blob) => void;
   onFrameMeta?: (meta: FrameMeta) => void;
   onHello?: (msg: Extract<BridgeMsg, { type: 'hello' }>) => void;
@@ -85,6 +86,7 @@ export class BridgeClient {
     switch (msg.type) {
       case 'hello': this.events.onHello?.(msg); break;
       case 'snapshot': this.events.onSnapshot?.(msg.data); break;
+      case 'inspect:point': this.events.onPointInspect?.(msg); break;
       case 'frame:meta': this.events.onFrameMeta?.(msg); break;
       case 'error': this.events.onError?.(msg.message); break;
     }

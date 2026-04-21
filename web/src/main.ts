@@ -1,5 +1,5 @@
 import type { AXNode, Snapshot } from '../../shared/protocol';
-import { bestLabel, hitTest } from './hittest';
+import { area, bestLabel, hitTest } from './hittest';
 import { InspectorOverlay } from './overlay';
 import { mockFrameDataUrl, mockSnapshot } from './mock';
 import { BridgeClient } from './ws';
@@ -60,7 +60,8 @@ let hasRealTree = false;
 let transportPref: 'auto' | 'capturekit' | 'screenshot' = 'auto';
 let lastFrameSource: 'capturekit' | 'screenshot' | 'none' = 'none';
 let lastHelloTransport: 'capturekit' | 'screenshot' | 'none' = 'none';
-let legacyBoxes = false;
+let pointInspectSeq = 0;
+let selectedPointInspectSeq = 0;
 
 const bridge = new BridgeClient(wsUrl, {
   onHello: (msg) => {
@@ -77,6 +78,15 @@ const bridge = new BridgeClient(wsUrl, {
     hasRealTree = true;
     applySnapshot(s);
     setSource(s.source);
+  },
+  onPointInspect: (msg) => {
+    if (msg.requestId !== selectedPointInspectSeq) return;
+    const path = mergePath(hitTest(snapshot.nodes, msg.x, msg.y), msg.node);
+    const leaf = path.at(-1) ?? null;
+    selected = leaf;
+    overlay.showSelection(selected);
+    renderSelected(selected, path);
+    logSelectionForAgent(selected, path);
   },
   onFrame: (blob) => {
     if (!hasRealFrames) console.log('[frame] first frame', blob.size, 'bytes', blob.type);
@@ -99,9 +109,6 @@ const bridge = new BridgeClient(wsUrl, {
 
     lastFrameSource = meta.source;
     overlay.setFrameMeta(meta.width, meta.height, meta.source);
-    // Only in *forced* CaptureKit mode, switch boxes back to legacy mapping.
-    legacyBoxes = (transportPref === 'capturekit' && meta.source === 'capturekit');
-    overlay.setLegacyBoxMapping(legacyBoxes);
   },
   onStatus: (s) => {
     if (s === 'live') liveDot.classList.add('live');
@@ -135,15 +142,45 @@ function clearMockState() {
   // When connected to a real bridge, wipe mock nodes so hit-test doesn't
   // draw phantom overlays on top of real sim frames.
   snapshot = { ...mockSnapshot, nodes: [], source: 'none' };
-  selected = null;
+  clearSelection();
   hovered = [];
   overlay.showHover(null);
-  overlay.showSelection(null);
-  renderSelected(null, []);
   setSource('none');
 }
 
 bridge.connect();
+
+function clearSelection() {
+  selected = null;
+  overlay.showSelection(null);
+  renderSelected(null, []);
+}
+
+function requestPointInspect(p: { x: number; y: number }) {
+  const requestId = ++pointInspectSeq;
+  selectedPointInspectSeq = requestId;
+  bridge.send({ type: 'inspect:point', x: p.x, y: p.y, requestId });
+}
+
+function mergePath(path: AXNode[], pointNode: AXNode | null): AXNode[] {
+  if (!pointNode) return path;
+  if (path.some((n) => sameNode(n, pointNode))) return path;
+  return [...path, pointNode].sort((a, b) => area(b.frame) - area(a.frame));
+}
+
+function sameNode(a: AXNode, b: AXNode): boolean {
+  return (
+    a.id === b.id ||
+    (
+      a.role === b.role &&
+      a.label === b.label &&
+      a.frame.x === b.frame.x &&
+      a.frame.y === b.frame.y &&
+      a.frame.w === b.frame.w &&
+      a.frame.h === b.frame.h
+    )
+  );
+}
 
 // ---------- inspect interactions ----------
 setInspectMode(true);
@@ -151,7 +188,11 @@ setInspectMode(true);
 screenEl.addEventListener('mousemove', (e) => {
   if (!inspectMode || frozen) return;
   const p = overlay.hitPoint(e);
-  if (!p) { hovered = []; overlay.showHover(null); return; }
+  if (!p) {
+    hovered = [];
+    overlay.showHover(null);
+    return;
+  }
   hovered = hitTest(snapshot.nodes, p.x, p.y);
   const deepest = hovered.at(-1) ?? null;
   overlay.showHover(deepest);
@@ -170,10 +211,20 @@ screenEl.addEventListener('click', (e) => {
   if (!p) return;
   if (inspectMode) {
     const path = hitTest(snapshot.nodes, p.x, p.y);
-    selected = path.at(-1) ?? null;
+    const next = path.at(-1) ?? null;
+    if (!next) {
+      clearSelection();
+      return;
+    }
+    if (selected && sameNode(selected, next)) {
+      clearSelection();
+      return;
+    }
+    selected = next;
     overlay.showSelection(selected);
     renderSelected(selected, path);
     logSelectionForAgent(selected, path);
+    requestPointInspect(p);
   } else {
     // passthrough tap → sim
     bridge.send({ type: 'hid:tap', x: p.x, y: p.y });
@@ -278,8 +329,22 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     return;
   }
-  if (e.key === 'i' || e.key === 'I') setInspectMode(!inspectMode);
-  if (e.key === 'Escape') { selected = null; overlay.showSelection(null); renderSelected(null, []); }
+  if (e.key === 'i' || e.key === 'I') {
+    setInspectMode(!inspectMode);
+    e.preventDefault();
+    return;
+  }
+  if (e.key === 'r' || e.key === 'R') {
+    bridge.send({ type: 'inspect:refresh' });
+    e.preventDefault();
+    return;
+  }
+  if (e.key === 'h' || e.key === 'H') {
+    bridge.send({ type: 'hid:key', key: 'home' });
+    e.preventDefault();
+    return;
+  }
+  if (e.key === 'Escape') clearSelection();
 });
 window.addEventListener('keyup', (e) => {
   if (e.key === 'Meta' || e.key === 'Control') frozen = false;
@@ -295,8 +360,6 @@ homeBtn.addEventListener('click', () => bridge.send({ type: 'hid:key', key: 'hom
 transportSel.addEventListener('change', () => {
   const v = transportSel.value as typeof transportPref;
   transportPref = v;
-  legacyBoxes = (transportPref === 'capturekit' && lastFrameSource === 'capturekit');
-  overlay.setLegacyBoxMapping(legacyBoxes);
   if (v === 'auto') return;
   bridge.send({ type: 'video:transport', transport: v });
 });
@@ -331,9 +394,13 @@ function applySnapshot(s: Snapshot) {
   overlay.setSimSize(s.simSize.w, s.simSize.h);
   if (selected) {
     const still = s.nodes.find(n => n.id === selected!.id) ?? null;
+    if (!still) {
+      clearSelection();
+      return;
+    }
     selected = still;
     overlay.showSelection(selected);
-    renderSelected(selected, still ? [still] : []);
+    renderSelected(selected, [still]);
   }
 }
 
@@ -341,7 +408,11 @@ function setInspectMode(on: boolean) {
   inspectMode = on;
   inspectBtn.setAttribute('aria-pressed', String(on));
   screenEl.classList.toggle('inspect', on);
-  if (!on) overlay.showHover(null);
+  if (!on) {
+    hovered = [];
+    overlay.showHover(null);
+    clearSelection();
+  }
 
   // In AUTO mode: use simctl frames for inspect (accurate AX mapping),
   // and CaptureKit for interaction (fast, low-latency).
@@ -388,9 +459,23 @@ function renderSelected(node: AXNode | null, path: AXNode[]) {
   const extraId =
     bl.kind !== 'id' && node.identifier
       ? ` <span class="dim">#${escapeHtml(node.identifier)}</span>` : '';
-  const valueBit = node.value
-    ? `<div class="meta"><span class="dim">value:</span> <code>${escapeHtml(node.value)}</code></div>`
-    : '';
+  const metaBits = [
+    node.value
+      ? `<div class="meta"><span class="dim">value:</span> <code>${escapeHtml(node.value)}</code></div>`
+      : '',
+    node.subrole
+      ? `<div class="meta"><span class="dim">subrole:</span> <code>${escapeHtml(node.subrole)}</code></div>`
+      : '',
+    node.help
+      ? `<div class="meta"><span class="dim">help:</span> <code>${escapeHtml(node.help)}</code></div>`
+      : '',
+    node.customActions.length
+      ? `<div class="meta"><span class="dim">actions:</span> <code>${escapeHtml(node.customActions.join(', '))}</code></div>`
+      : '',
+    node.contentRequired
+      ? `<div class="meta"><span class="dim">content required</span></div>`
+      : '',
+  ].filter(Boolean).join('');
 
   selectedEl.innerHTML = `
     <div><span class="tag">&lt;${escapeHtml(node.type)} /&gt;</span>${labelHtml}${extraId}</div>
@@ -399,7 +484,7 @@ function renderSelected(node: AXNode | null, path: AXNode[]) {
       <span>@ ${Math.round(node.frame.x)}, ${Math.round(node.frame.y)}</span>
       <span class="dim">${escapeHtml(node.role)}</span>
     </div>
-    ${valueBit}
+    ${metaBits}
   `;
 
   stackEl.innerHTML = '';
@@ -417,7 +502,15 @@ function renderSelected(node: AXNode | null, path: AXNode[]) {
       <span class="coord">${Math.round(n.frame.w)}×${Math.round(n.frame.h)}</span>
     `;
     li.addEventListener('mouseenter', () => overlay.showHover(n));
-    li.addEventListener('click', () => { selected = n; overlay.showSelection(n); renderSelected(n, path.slice(0, i + 1)); });
+    li.addEventListener('click', () => {
+      if (selected && sameNode(selected, n)) {
+        clearSelection();
+        return;
+      }
+      selected = n;
+      overlay.showSelection(n);
+      renderSelected(n, path.slice(0, i + 1));
+    });
     stackEl.appendChild(li);
   });
 }
@@ -429,9 +522,12 @@ function logSelectionForAgent(node: AXNode | null, path: AXNode[]) {
     role: node.role,
     label: node.label,
     identifier: node.identifier,
+    subrole: node.subrole,
+    help: node.help,
+    customActions: node.customActions,
     frame: node.frame,
     ancestors: path.slice(0, -1).map(n => ({
-      type: n.type, label: n.label, identifier: n.identifier,
+      type: n.type, label: n.label, identifier: n.identifier, subrole: n.subrole,
     })),
   };
   console.log('[selected]', payload);

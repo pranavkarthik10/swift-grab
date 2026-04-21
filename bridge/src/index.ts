@@ -5,7 +5,7 @@ import {
   type VideoTransport,
   BIN_TAG_IMAGE,
 } from '../../shared/protocol';
-import { captureSnapshot } from './ax';
+import { captureSnapshot, describePoint } from './ax';
 import {
   detectCapabilities,
   idbKey,
@@ -235,6 +235,12 @@ const server = Bun.serve({
           case 'inspect:refresh': {
             const snap = await captureSnapshot(caps.deviceId);
             if (snap) send(ws, { type: 'snapshot', data: snap });
+            break;
+          }
+          case 'inspect:point': {
+            if (!caps.idb) throw new Error('idb not installed');
+            const node = await describePoint(msg.x, msg.y);
+            send(ws, { type: 'inspect:point', requestId: msg.requestId, x: msg.x, y: msg.y, node });
             break;
           }
           case 'hid:tap':

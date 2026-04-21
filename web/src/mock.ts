@@ -58,6 +58,10 @@ function node(
     label,
     identifier: null,
     value: null,
+    help: null,
+    subrole: null,
+    customActions: [],
+    contentRequired: false,
     frame: { x, y, w, h },
     enabled: true,
   };

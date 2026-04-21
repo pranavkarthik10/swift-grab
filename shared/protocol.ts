@@ -11,6 +11,10 @@ export type AXNode = {
   label: string | null;            // visible AX label — this is the grep key
   identifier: string | null;       // accessibilityIdentifier if set
   value: string | null;
+  help: string | null;
+  subrole: string | null;
+  customActions: string[];
+  contentRequired: boolean;
   frame: Frame;                    // in sim-pixel coordinates
   enabled: boolean;
 };
@@ -26,6 +30,7 @@ export type Snapshot = {
 // Client → Bridge
 export type ClientMsg =
   | { type: 'inspect:refresh' }
+  | { type: 'inspect:point'; x: number; y: number; requestId: number }
   | { type: 'video:transport'; transport: VideoTransport }
   | { type: 'hid:tap'; x: number; y: number }
   | { type: 'hid:swipe'; x1: number; y1: number; x2: number; y2: number; durationMs?: number }
@@ -45,6 +50,7 @@ export type VideoTransport = 'capturekit' | 'screenshot' | 'none';
 export type BridgeMsg =
   | { type: 'hello'; version: string; deviceId: string; capabilities: Capabilities }
   | { type: 'snapshot'; data: Snapshot }
+  | { type: 'inspect:point'; requestId: number; x: number; y: number; node: AXNode | null }
   | { type: 'frame:meta'; width: number; height: number; fps: number; source: VideoTransport }
   | { type: 'error'; message: string };
 
