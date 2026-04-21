@@ -26,21 +26,32 @@ export type Snapshot = {
 // Client → Bridge
 export type ClientMsg =
   | { type: 'inspect:refresh' }
+  | { type: 'video:transport'; transport: VideoTransport }
   | { type: 'hid:tap'; x: number; y: number }
   | { type: 'hid:swipe'; x1: number; y1: number; x2: number; y2: number; durationMs?: number }
   | { type: 'hid:text'; text: string }
   | { type: 'hid:key'; key: 'home' | 'lock' | 'volumeUp' | 'volumeDown' };
 
 // Bridge → Client
-// (binary WS messages on the same socket carry image frames — PNG by default)
+// Binary WS messages on the same socket carry JPEG frames. First byte
+// is a tag, payload is the frame:
+//   0x01 = full image frame (JPEG or PNG, sniff from magic bytes)
+// Kept as a tag rather than raw bytes so we have forward room for
+// alternative frame formats without rewriting the client.
+export const BIN_TAG_IMAGE = 0x01;
+
+export type VideoTransport = 'capturekit' | 'screenshot' | 'none';
+
 export type BridgeMsg =
   | { type: 'hello'; version: string; deviceId: string; capabilities: Capabilities }
   | { type: 'snapshot'; data: Snapshot }
-  | { type: 'frame:meta'; width: number; height: number; mime: 'image/png' | 'image/jpeg' }
+  | { type: 'frame:meta'; width: number; height: number; fps: number; source: VideoTransport }
   | { type: 'error'; message: string };
 
 export type Capabilities = {
   idb: boolean;      // idb installed → AX + taps available
-  simctl: boolean;   // simctl installed → frames available
+  simctl: boolean;   // simctl installed → screenshot fallback available
   booted: boolean;   // a sim is currently booted
+  capturekit: boolean; // ScreenCaptureKit sidecar built and runnable
+  videoTransport: VideoTransport;
 };

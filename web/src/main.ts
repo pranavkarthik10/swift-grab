@@ -20,6 +20,7 @@ const selectionBox = $('selectionBox');
 const inspectBtn = $<HTMLButtonElement>('inspectBtn');
 const refreshBtn = $<HTMLButtonElement>('refreshBtn');
 const homeBtn = $<HTMLButtonElement>('homeBtn');
+const transportSel = $<HTMLSelectElement>('transportSel');
 const closeSidebarBtn = $<HTMLButtonElement>('closeSidebar');
 const openSidebarBtn = $<HTMLButtonElement>('openSidebar');
 const selectedEl = $('selected');
@@ -31,6 +32,7 @@ const liveDot = document.querySelector<HTMLElement>('.title .dot')!;
 
 const overlay = new InspectorOverlay({
   screen: screenEl,
+  frameImg,
   overlay: overlayEl,
   box: overlayBox,
   label: overlayLabel,
@@ -53,20 +55,22 @@ deviceEl.textContent = snapshot.deviceId;
 // ---------- bridge ----------
 const wsUrl = `ws://${location.hostname || 'localhost'}:7878/ws`;
 let liveFrameUrl: string | null = null;
-
 let hasRealFrames = false;
 let hasRealTree = false;
+let transportPref: 'auto' | 'capturekit' | 'screenshot' = 'auto';
+let lastFrameSource: 'capturekit' | 'screenshot' | 'none' = 'none';
+let lastHelloTransport: 'capturekit' | 'screenshot' | 'none' = 'none';
 
 const bridge = new BridgeClient(wsUrl, {
   onHello: (msg) => {
     deviceEl.textContent = msg.deviceId;
-    const { idb, simctl, booted } = msg.capabilities;
-    // Clear stale mock data as soon as we connect to a real bridge — we'll
-    // replace it with real frames / real AX, or a clear "unavailable" note.
+    const { idb, simctl, booted, videoTransport } = msg.capabilities;
     clearMockState();
     if (!booted) setStatus('err', 'no booted simulator');
     else if (!idb && simctl) setStatus('live', 'frames only — install idb for inspector');
-    else setStatus('live');
+    else setStatus('live', videoTransport === 'capturekit' ? 'ScreenCaptureKit 50fps' : videoTransport === 'screenshot' ? 'simctl fallback' : '');
+    if (transportPref === 'auto') transportSel.value = 'auto';
+    lastHelloTransport = videoTransport;
   },
   onSnapshot: (s) => {
     hasRealTree = true;
@@ -74,10 +78,26 @@ const bridge = new BridgeClient(wsUrl, {
     setSource(s.source);
   },
   onFrame: (blob) => {
+    if (!hasRealFrames) console.log('[frame] first frame', blob.size, 'bytes', blob.type);
     hasRealFrames = true;
     if (liveFrameUrl) URL.revokeObjectURL(liveFrameUrl);
     liveFrameUrl = URL.createObjectURL(blob);
     frameImg.src = liveFrameUrl;
+  },
+  onFrameMeta: (meta) => {
+    // ScreenCaptureKit emits real pixel dimensions; use them as the
+    // coord space only if the AX tree hasn't already given us one.
+    if (!hasRealTree && meta.width > 0 && meta.height > 0) {
+      overlay.setSimSize(meta.width, meta.height);
+    }
+    const note =
+      meta.source === 'capturekit' ? `ScreenCaptureKit ${meta.fps}fps` :
+      meta.source === 'screenshot' ? 'simctl fallback' :
+      '';
+    if (note) setStatus('live', note);
+
+    lastFrameSource = meta.source;
+    overlay.setFrameMeta(meta.width, meta.height, meta.source);
   },
   onStatus: (s) => {
     if (s === 'live') liveDot.classList.add('live');
@@ -101,6 +121,9 @@ const bridge = new BridgeClient(wsUrl, {
 frameImg.addEventListener('load', () => {
   if (!hasRealTree && hasRealFrames && frameImg.naturalWidth > 0) {
     overlay.setSimSize(frameImg.naturalWidth, frameImg.naturalHeight);
+  }
+  if (frameImg.naturalWidth > 0 && frameImg.naturalHeight > 0) {
+    overlay.setFrameMeta(frameImg.naturalWidth, frameImg.naturalHeight, lastFrameSource);
   }
 });
 
@@ -153,10 +176,97 @@ screenEl.addEventListener('click', (e) => {
   }
 });
 
+// ---------- wheel → swipe (scroll passthrough) ----------
+// Mouse wheel / trackpad scroll over the sim maps to `idb ui swipe`.
+// idb swipes are blocking (~150ms per call) so we coalesce deltas into
+// a single swipe fired after a short idle window. Not buttery-smooth
+// like native scroll but good enough for navigating lists.
+let wheelAccumY = 0;
+let wheelStart: { x: number; y: number } | null = null;
+let wheelTimer: number | null = null;
+
+screenEl.addEventListener('wheel', (e) => {
+  if (inspectMode) return;
+  e.preventDefault();
+  const p = overlay.hitPoint(e);
+  if (!p) return;
+  if (!wheelStart) wheelStart = p;
+  wheelAccumY += e.deltaY;
+  if (wheelTimer != null) window.clearTimeout(wheelTimer);
+  wheelTimer = window.setTimeout(() => {
+    const start = wheelStart!;
+    const delta = Math.max(-400, Math.min(400, wheelAccumY));
+    const duration = Math.max(100, Math.min(500, Math.abs(delta) * 1.2));
+    bridge.send({
+      type: 'hid:swipe',
+      x1: start.x, y1: start.y,
+      x2: start.x, y2: start.y - delta,
+      durationMs: duration,
+    });
+    wheelAccumY = 0;
+    wheelStart = null;
+    wheelTimer = null;
+  }, 70);
+}, { passive: false });
+
+// ---------- mouse drag → swipe ----------
+// In interaction mode, dragging on the sim creates a swipe.
+// (No modifier keys; avoids relying on trackpad gestures.)
+let dragStartClient: { x: number; y: number } | null = null;
+let dragStartSim: { x: number; y: number } | null = null;
+let dragging = false;
+
+screenEl.addEventListener('mousedown', (e) => {
+  if (inspectMode) return;
+  // Only left mouse button.
+  if (e.button !== 0) return;
+  const p = overlay.hitPointClient(e.clientX, e.clientY);
+  if (!p) return;
+  dragStartClient = { x: e.clientX, y: e.clientY };
+  dragStartSim = p;
+  dragging = false;
+});
+
+window.addEventListener('mousemove', (e) => {
+  if (inspectMode) return;
+  if (!dragStartClient || !dragStartSim) return;
+  const dx = e.clientX - dragStartClient.x;
+  const dy = e.clientY - dragStartClient.y;
+  if (!dragging) {
+    if (Math.hypot(dx, dy) >= 8) dragging = true;
+    else return;
+  }
+  // Prevent text selection / accidental drags while swiping.
+  e.preventDefault?.();
+});
+
+window.addEventListener('mouseup', (e) => {
+  if (inspectMode) { dragStartClient = null; dragStartSim = null; dragging = false; return; }
+  if (!dragStartClient || !dragStartSim) return;
+  const end = overlay.hitPointClient(e.clientX, e.clientY);
+  const start = dragStartSim;
+  dragStartClient = null;
+  dragStartSim = null;
+  const wasDragging = dragging;
+  dragging = false;
+  if (!end) return;
+
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const dist = Math.hypot(dx, dy);
+  if (!wasDragging || dist < 12) return;
+  const duration = Math.max(120, Math.min(650, dist * 1.1));
+  bridge.send({
+    type: 'hid:swipe',
+    x1: start.x, y1: start.y,
+    x2: end.x, y2: end.y,
+    durationMs: duration,
+  });
+});
+
 // Cmd / Ctrl to freeze hover (so you can drag over to the sidebar)
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Meta' || e.key === 'Control') frozen = true;
-  // Shift+I toggles the sidebar; plain I still toggles inspect mode.
   if ((e.key === 'I' || e.key === 'i') && e.shiftKey) {
     const nowHidden = !document.body.classList.contains('sidebar-hidden');
     userOverride = nowHidden ? 'closed' : 'open';
@@ -170,18 +280,22 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => {
   if (e.key === 'Meta' || e.key === 'Control') frozen = false;
 });
+window.addEventListener('blur', () => { frozen = false; });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') frozen = false;
+});
 
 inspectBtn.addEventListener('click', () => setInspectMode(!inspectMode));
 refreshBtn.addEventListener('click', () => bridge.send({ type: 'inspect:refresh' }));
 homeBtn.addEventListener('click', () => bridge.send({ type: 'hid:key', key: 'home' }));
+transportSel.addEventListener('change', () => {
+  const v = transportSel.value as typeof transportPref;
+  transportPref = v;
+  if (v === 'auto') return;
+  bridge.send({ type: 'video:transport', transport: v });
+});
 
 // ---------- sidebar visibility ----------
-// Sidebar has three states:
-//   - shown: default on wide viewports
-//   - user-hidden: toggled via the close/open buttons (or Shift+I)
-//   - auto-narrow: viewport is too narrow to fit sidebar + sim comfortably
-// User intent wins over auto — once the user has explicitly opened or
-// closed, we stop auto-toggling until they resize into a new regime.
 const AUTO_NARROW_PX = 760;
 let userOverride: 'open' | 'closed' | null = null;
 
@@ -191,17 +305,12 @@ function applySidebarState() {
     userOverride === 'closed' ||
     (userOverride === null && narrow);
   document.body.classList.toggle('sidebar-hidden', shouldHide);
-  // auto-narrow class only when it's purely auto, so CSS can style it
-  // differently later if we want (e.g., a hint that it'll come back on resize).
   document.body.classList.toggle('auto-narrow', shouldHide && userOverride === null);
 }
 
 closeSidebarBtn.addEventListener('click', () => { userOverride = 'closed'; applySidebarState(); });
 openSidebarBtn.addEventListener('click',  () => { userOverride = 'open';   applySidebarState(); });
 window.addEventListener('resize', () => {
-  // If the user resizes across the threshold, drop their override so the
-  // layout can adapt again. This prevents "stuck hidden" when they drag
-  // the window back to wide.
   const narrow = window.innerWidth < AUTO_NARROW_PX;
   if (userOverride === 'closed' && !narrow) userOverride = null;
   if (userOverride === 'open'   && narrow)  userOverride = null;
@@ -214,7 +323,6 @@ applySidebarState();
 function applySnapshot(s: Snapshot) {
   snapshot = s;
   overlay.setSimSize(s.simSize.w, s.simSize.h);
-  // keep selection if the element still exists, otherwise drop it
   if (selected) {
     const still = s.nodes.find(n => n.id === selected!.id) ?? null;
     selected = still;
@@ -228,6 +336,17 @@ function setInspectMode(on: boolean) {
   inspectBtn.setAttribute('aria-pressed', String(on));
   screenEl.classList.toggle('inspect', on);
   if (!on) overlay.showHover(null);
+
+  // In AUTO mode: use simctl frames for inspect (accurate AX mapping),
+  // and CaptureKit for interaction (fast, low-latency).
+  if (transportPref === 'auto') {
+    const want = on ? 'screenshot' : 'capturekit';
+    // Only send if it would be a change (avoid spamming).
+    if (lastHelloTransport !== want) {
+      bridge.send({ type: 'video:transport', transport: want });
+      lastHelloTransport = want;
+    }
+  }
 }
 
 function setStatus(kind: 'connecting' | 'live' | 'mock' | 'err', note?: string) {
@@ -260,7 +379,6 @@ function renderSelected(node: AXNode | null, path: AXNode[]) {
     : bl.kind === 'role' ? ` <span class="role">${escapeHtml(bl.text)}</span>`
     : bl.kind === 'id'   ? ` <span class="dim">#${escapeHtml(bl.text)}</span>`
     : '';
-  // When we fall back to roleDescription/id, also show identifier if distinct.
   const extraId =
     bl.kind !== 'id' && node.identifier
       ? ` <span class="dim">#${escapeHtml(node.identifier)}</span>` : '';
@@ -300,8 +418,6 @@ function renderSelected(node: AXNode | null, path: AXNode[]) {
 
 function logSelectionForAgent(node: AXNode | null, path: AXNode[]) {
   if (!node) return;
-  // This is the payload a coding agent would receive as context.
-  // Intentionally minimal: what was tapped + ancestor chain for grep.
   const payload = {
     type: node.type,
     role: node.role,
@@ -312,7 +428,6 @@ function logSelectionForAgent(node: AXNode | null, path: AXNode[]) {
       type: n.type, label: n.label, identifier: n.identifier,
     })),
   };
-  // eslint-disable-next-line no-console
   console.log('[selected]', payload);
 }
 

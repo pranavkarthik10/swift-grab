@@ -1,12 +1,14 @@
 {
   "name": "swift-grab-bridge",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:capture": "cd capture && swift build -c release",
+    "postinstall": "bun run build:capture || echo '[bridge] Swift capture build failed — falling back to simctl screenshots. Run `cd bridge/capture && swift build -c release` to enable ScreenCaptureKit.'"
   },
   "devDependencies": {
     "@types/bun": "latest",

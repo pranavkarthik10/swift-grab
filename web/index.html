@@ -30,6 +30,16 @@
             <button id="refreshBtn">Refresh tree</button>
             <button id="homeBtn">Home</button>
           </div>
+          <div class="row">
+            <label class="select">
+              <span class="select-label">Video</span>
+              <select id="transportSel" aria-label="Video transport">
+                <option value="auto">Auto</option>
+                <option value="capturekit">Fast (CaptureKit)</option>
+                <option value="screenshot">Accurate (simctl)</option>
+              </select>
+            </label>
+          </div>
         </div>
 
         <section class="panel">
@@ -56,6 +66,10 @@
         </button>
         <div id="screenFrame">
           <div id="screen">
+            <!-- <img> is driven by the bridge's binary frame stream.
+                 Frames come from ScreenCaptureKit (preferred, ~50fps
+                 JPEGs) or simctl screenshots (fallback, ~5-8fps). The
+                 overlay + selection box sit on top. -->
             <img id="frameImg" alt="" draggable="false" />
             <div id="overlay" class="overlay hidden">
               <div id="overlayBox" class="overlay-box"></div>

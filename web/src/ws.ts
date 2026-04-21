@@ -1,8 +1,16 @@
-import type { BridgeMsg, ClientMsg, Snapshot } from '../../shared/protocol';
+import {
+  type BridgeMsg,
+  type ClientMsg,
+  type Snapshot,
+  BIN_TAG_IMAGE,
+} from '../../shared/protocol';
+
+export type FrameMeta = Extract<BridgeMsg, { type: 'frame:meta' }>;
 
 export type BridgeEvents = {
   onSnapshot?: (s: Snapshot) => void;
   onFrame?: (blob: Blob) => void;
+  onFrameMeta?: (meta: FrameMeta) => void;
   onHello?: (msg: Extract<BridgeMsg, { type: 'hello' }>) => void;
   onStatus?: (s: 'connecting' | 'live' | 'error' | 'closed') => void;
   onError?: (msg: string) => void;
@@ -39,12 +47,14 @@ export class BridgeClient {
     this.events.onStatus?.('connecting');
     try {
       this.ws = new WebSocket(this.url);
-    } catch (e) {
+    } catch {
       this.events.onStatus?.('error');
       this.retry();
       return;
     }
-    this.ws.binaryType = 'blob';
+    // ArrayBuffer (not Blob) — avoids an async Blob.arrayBuffer() hop
+    // per frame, which matters at 50fps.
+    this.ws.binaryType = 'arraybuffer';
     this.ws.onopen = () => this.events.onStatus?.('live');
     this.ws.onclose = () => {
       this.events.onStatus?.('closed');
@@ -60,7 +70,12 @@ export class BridgeClient {
   }
 
   private handleMessage(data: unknown) {
+    if (data instanceof ArrayBuffer) {
+      this.handleBinary(new Uint8Array(data));
+      return;
+    }
     if (data instanceof Blob) {
+      // Defensive: older harness code might still set binaryType=blob.
       this.events.onFrame?.(data);
       return;
     }
@@ -70,8 +85,25 @@ export class BridgeClient {
     switch (msg.type) {
       case 'hello': this.events.onHello?.(msg); break;
       case 'snapshot': this.events.onSnapshot?.(msg.data); break;
+      case 'frame:meta': this.events.onFrameMeta?.(msg); break;
       case 'error': this.events.onError?.(msg.message); break;
-      case 'frame:meta': break; // reserved for future use
     }
   }
+
+  private handleBinary(u8: Uint8Array) {
+    if (u8.length < 2) return;
+    const tag = u8[0];
+    const payload = u8.subarray(1);
+    if (tag === BIN_TAG_IMAGE) {
+      const copy = new Uint8Array(payload.length);
+      copy.set(payload);
+      this.events.onFrame?.(new Blob([copy], { type: sniffMime(payload) }));
+    }
+  }
+}
+
+function sniffMime(u8: Uint8Array): string {
+  if (u8.length >= 3 && u8[0] === 0xff && u8[1] === 0xd8 && u8[2] === 0xff) return 'image/jpeg';
+  if (u8.length >= 8 && u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4e && u8[3] === 0x47) return 'image/png';
+  return 'application/octet-stream';
 }

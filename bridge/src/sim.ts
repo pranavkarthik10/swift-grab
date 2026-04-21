@@ -46,11 +46,16 @@ export async function detectCapabilities(): Promise<Capabilities> {
   }
   // idb needs an explicit connect the first time a companion spawns; calling
   // it on an already-connected target is a cheap no-op, so we always do it.
+  // BUT: if the idb companion is wedged (seen this several times after
+  // killing `idb video-stream`), `idb connect` hangs forever and takes the
+  // whole bridge down. Race it against a 3s deadline and move on.
   if (idb && booted && udid) {
-    try {
-      const p = Bun.spawn(['idb', 'connect', udid], { stdout: 'pipe', stderr: 'pipe' });
-      await p.exited;
-    } catch { /* ignore */ }
+    const p = Bun.spawn(['idb', 'connect', udid], { stdout: 'pipe', stderr: 'pipe' });
+    const deadline = new Promise<void>((res) => setTimeout(() => {
+      try { p.kill('SIGKILL'); } catch { /* ignore */ }
+      res();
+    }, 3000));
+    await Promise.race([p.exited.then(() => {}), deadline]);
   }
   return { idb, simctl, booted, deviceId, udid };
 }

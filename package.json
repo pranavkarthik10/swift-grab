@@ -8,6 +8,7 @@
     "dev:web": "bun --filter swift-grab-web dev",
     "dev:bridge": "bun --filter swift-grab-bridge dev",
     "build:web": "bun --filter swift-grab-web build",
+    "build:capture": "bun --filter swift-grab-bridge build:capture",
     "typecheck": "bun --filter '*' typecheck"
   },
   "devDependencies": {

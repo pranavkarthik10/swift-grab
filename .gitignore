@@ -6,6 +6,12 @@ dist/
 .env.local
 .vite/
 
+# SwiftPM
+.build/
+
+# Editor
+.vscode/
+
 # personal roadmap / scratch notes
 TODO.md
 .notes/

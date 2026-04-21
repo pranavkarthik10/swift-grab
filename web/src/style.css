@@ -155,6 +155,29 @@ body.auto-narrow .floating-btn {
   grid-template-columns: 1fr 1fr;
   gap: 8px;
 }
+.select {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  align-items: center;
+}
+.select-label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--fg-mute);
+  font-weight: 600;
+}
+.select select {
+  appearance: none;
+  background: var(--bg-2);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 12.5px;
+}
 
 button {
   appearance: none;
@@ -303,36 +326,41 @@ button.primary[aria-pressed="true"] .key {
 .status.mock::before { background: var(--warn); }
 .status.err::before  { background: var(--err); }
 
-/* ===== Stage / video ===== */
+/* ===== Stage / video =====
+   Layout note: the captured image already includes Simulator.app's
+   device bezel + titlebar, so we don't wrap it in a fake phone shell.
+   The img is the sized element — #screen hugs it so overlays line up. */
 #stage {
   position: relative;
-  display: grid;
-  place-items: center;
-  padding: 32px;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-#screenFrame {
-  position: relative;
-  max-height: 100%;
-  max-width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 24px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  transition: padding 180ms ease;
+}
+body.sidebar-hidden #stage,
+body.auto-narrow #stage {
+  padding: 12px;
+}
+#screenFrame {
+  position: relative;
+  display: inline-flex;
+  max-width: 100%;
+  max-height: 100%;
 }
 #screen {
   position: relative;
-  background: #000;
-  border-radius: 32px;
-  border: 1px solid var(--line);
-  box-shadow:
-    0 40px 60px -30px rgba(0, 0, 0, 0.6),
-    0 0 0 6px rgba(255, 255, 255, 0.02) inset;
+  display: inline-block;
   overflow: hidden;
-  width: min(420px, 36vw);
-  aspect-ratio: 390 / 844;
+  border-radius: 12px;
+  box-shadow: 0 30px 50px -30px rgba(0, 0, 0, 0.6);
   transition: box-shadow 200ms;
+  max-width: 100%;
+  max-height: 100%;
+  line-height: 0;
 }
 #screen.inspect {
   box-shadow:
@@ -342,13 +370,19 @@ button.primary[aria-pressed="true"] .key {
   cursor: crosshair;
 }
 #frameImg {
-  position: absolute; inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  display: block;
+  /* Let the viewport drive size while preserving the source aspect
+     ratio. `max-height` against the stage (parent chain all has
+     height 100%) keeps us inside the shell; `max-width` against the
+     stage covers the narrow/tall window case. */
+  max-height: calc(100vh - 48px);
+  max-width: 100%;
+  width: auto;
+  height: auto;
   user-select: none;
   -webkit-user-drag: none;
 }
+#frameImg.hidden { display: none; }
 
 /* hover overlay */
 .overlay {
