@@ -48,11 +48,13 @@ function node(
   label: string | null,
   x: number, y: number, w: number, h: number,
   role = 'AXGroup',
+  roleDescription: string | null = null,
 ): AXNode {
   return {
     id,
     type,
     role,
+    roleDescription,
     label,
     identifier: null,
     value: null,

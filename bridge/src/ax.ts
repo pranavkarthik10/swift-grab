@@ -35,6 +35,7 @@ function normalize(raw: RawAX[], deviceId: string): Snapshot {
     id: r.AXUniqueId || `n${i}`,
     type: prettyType(r),
     role: r.role,
+    roleDescription: r.role_description ?? null,
     label: r.AXLabel ?? r.title ?? null,
     identifier: r.AXUniqueId ?? null,
     value: r.AXValue ?? null,

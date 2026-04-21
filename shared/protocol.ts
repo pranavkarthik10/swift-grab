@@ -7,6 +7,7 @@ export type AXNode = {
   id: string;
   type: string;                    // e.g. "Button", "Text", "View"
   role: string;                    // raw AX role, e.g. "AXButton"
+  roleDescription: string | null;  // human description, e.g. "Nav bar", "button"
   label: string | null;            // visible AX label — this is the grep key
   identifier: string | null;       // accessibilityIdentifier if set
   value: string | null;

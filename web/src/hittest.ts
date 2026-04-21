@@ -30,3 +30,18 @@ export function describe(n: AXNode): string {
   const h = Math.round(n.frame.h);
   return `<${n.type} />${label} — ${w}×${h}`;
 }
+
+/**
+ * Returns the best available human-readable label for a node. Falls back
+ * to roleDescription (e.g. "Nav bar", "scroll view"), then AXUniqueId,
+ * when a visible AXLabel isn't set. Useful for SwiftUI views where the
+ * toolbar / container doesn't have a direct text label.
+ */
+export function bestLabel(n: AXNode): { text: string; kind: 'label' | 'role' | 'id' | 'none' } {
+  if (n.label && n.label.trim()) return { text: n.label, kind: 'label' };
+  if (n.roleDescription && n.roleDescription.trim())
+    return { text: n.roleDescription, kind: 'role' };
+  if (n.identifier && n.identifier.trim())
+    return { text: n.identifier, kind: 'id' };
+  return { text: '', kind: 'none' };
+}

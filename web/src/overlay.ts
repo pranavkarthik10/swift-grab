@@ -1,4 +1,5 @@
 import type { AXNode, Frame } from '../../shared/protocol';
+import { bestLabel } from './hittest';
 
 type El<T extends HTMLElement = HTMLElement> = T;
 
@@ -51,7 +52,9 @@ export class InspectorOverlay {
     this.box.style.width = `${w}%`;
     this.box.style.height = `${h}%`;
 
-    this.label.textContent = `<${node.type} /> ${Math.round(node.frame.w)}×${Math.round(node.frame.h)}`;
+    const bl = bestLabel(node);
+    const labelBit = bl.text ? ` ${bl.kind === 'label' ? `“${bl.text}”` : bl.text}` : '';
+    this.label.textContent = `<${node.type} />${labelBit} · ${Math.round(node.frame.w)}×${Math.round(node.frame.h)}`;
     // place label just under the box, clamped so it doesn't fall off-screen
     const labelY = Math.min(y + h, 100 - 4);
     this.label.style.left = `${x}%`;
