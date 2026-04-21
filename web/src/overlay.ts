@@ -19,6 +19,8 @@ export class InspectorOverlay {
   private source: VideoSource = 'none';
   // Cropping in source pixels: the phone screen rect inside the captured frame.
   private content = { x: 0, y: 0, w: 0, h: 0 };
+  // Only affects box drawing (NOT hit testing / input coords).
+  private legacyBoxMapping = false;
 
   constructor(opts: {
     screen: El; frameImg: HTMLImageElement; overlay: El; box: El; label: El; selection: El;
@@ -42,6 +44,13 @@ export class InspectorOverlay {
     this.frameH = naturalH || 0;
     this.source = source;
     this.recomputeContentRect();
+  }
+
+  // When true, draw boxes as if the whole frame is the device screen.
+  // This matches the "old" CaptureKit behavior some users prefer visually,
+  // while keeping input mapping accurate via `content`.
+  setLegacyBoxMapping(on: boolean) {
+    this.legacyBoxMapping = on;
   }
 
   /** Map a mouse event to sim-pixel coordinates, or null if outside. */
@@ -107,11 +116,13 @@ export class InspectorOverlay {
 
   private toClientRect(f: Frame) {
     const imgRect = this.frameImg.getBoundingClientRect();
-    const c = this.content;
-    const sx = c.x + (f.x / this.simW) * c.w;
-    const sy = c.y + (f.y / this.simH) * c.h;
-    const sw = (f.w / this.simW) * c.w;
-    const sh = (f.h / this.simH) * c.h;
+    const base = this.legacyBoxMapping
+      ? { x: 0, y: 0, w: (this.frameW || 1), h: (this.frameH || 1) }
+      : this.content;
+    const sx = base.x + (f.x / this.simW) * base.w;
+    const sy = base.y + (f.y / this.simH) * base.h;
+    const sw = (f.w / this.simW) * base.w;
+    const sh = (f.h / this.simH) * base.h;
 
     const x = (sx / (this.frameW || 1)) * imgRect.width;
     const y = (sy / (this.frameH || 1)) * imgRect.height;

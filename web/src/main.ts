@@ -60,6 +60,7 @@ let hasRealTree = false;
 let transportPref: 'auto' | 'capturekit' | 'screenshot' = 'auto';
 let lastFrameSource: 'capturekit' | 'screenshot' | 'none' = 'none';
 let lastHelloTransport: 'capturekit' | 'screenshot' | 'none' = 'none';
+let legacyBoxes = false;
 
 const bridge = new BridgeClient(wsUrl, {
   onHello: (msg) => {
@@ -98,6 +99,9 @@ const bridge = new BridgeClient(wsUrl, {
 
     lastFrameSource = meta.source;
     overlay.setFrameMeta(meta.width, meta.height, meta.source);
+    // Only in *forced* CaptureKit mode, switch boxes back to legacy mapping.
+    legacyBoxes = (transportPref === 'capturekit' && meta.source === 'capturekit');
+    overlay.setLegacyBoxMapping(legacyBoxes);
   },
   onStatus: (s) => {
     if (s === 'live') liveDot.classList.add('live');
@@ -291,6 +295,8 @@ homeBtn.addEventListener('click', () => bridge.send({ type: 'hid:key', key: 'hom
 transportSel.addEventListener('change', () => {
   const v = transportSel.value as typeof transportPref;
   transportPref = v;
+  legacyBoxes = (transportPref === 'capturekit' && lastFrameSource === 'capturekit');
+  overlay.setLegacyBoxMapping(legacyBoxes);
   if (v === 'auto') return;
   bridge.send({ type: 'video:transport', transport: v });
 });
