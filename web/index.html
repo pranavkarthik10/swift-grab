@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>sim — inspector</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside id="sidebar">
+        <header>
+          <div class="title">
+            <span class="dot"></span>
+            <h1>sim</h1>
+          </div>
+          <div class="device" id="device">—</div>
+        </header>
+
+        <div class="controls">
+          <button id="inspectBtn" class="primary" aria-pressed="false">
+            <span class="key">I</span> Inspect
+          </button>
+          <div class="row">
+            <button id="refreshBtn">Refresh tree</button>
+            <button id="homeBtn">Home</button>
+          </div>
+        </div>
+
+        <section class="panel">
+          <div class="panel-title">Selected</div>
+          <div id="selected" class="selected empty">hover any element</div>
+        </section>
+
+        <section class="panel grow">
+          <div class="panel-title">Component stack</div>
+          <ol id="stack" class="stack"></ol>
+        </section>
+
+        <footer>
+          <span id="status" class="status">connecting…</span>
+          <span id="source" class="source">—</span>
+        </footer>
+      </aside>
+
+      <main id="stage">
+        <div id="screenFrame">
+          <div id="screen">
+            <img id="frameImg" alt="" draggable="false" />
+            <div id="overlay" class="overlay hidden">
+              <div id="overlayBox" class="overlay-box"></div>
+              <div id="overlayLabel" class="overlay-label"></div>
+            </div>
+            <div id="selectionBox" class="selection-box hidden"></div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <script type="module" src="./src/main.ts"></script>
+  </body>
+</html>
