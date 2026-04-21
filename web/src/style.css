@@ -32,6 +32,21 @@ body {
   display: grid;
   grid-template-columns: 340px 1fr;
   height: 100vh;
+  transition: grid-template-columns 180ms ease;
+}
+/* Auto sim-only mode on narrow viewports — or explicit via body class */
+body.sidebar-hidden #app,
+body.auto-narrow #app {
+  grid-template-columns: 0 1fr;
+}
+body.sidebar-hidden #sidebar,
+body.auto-narrow #sidebar {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-20px);
+}
+#sidebar {
+  transition: opacity 160ms ease, transform 160ms ease;
 }
 
 /* ===== Sidebar ===== */
@@ -52,6 +67,64 @@ body {
   font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.2px;
+  flex: 1;
+}
+
+.icon-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fg-mute);
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.icon-btn:hover {
+  background: var(--bg-2);
+  border-color: var(--line);
+  color: var(--fg);
+}
+
+/* Floating re-open button only appears once the sidebar is hidden */
+.floating-btn {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 10;
+  appearance: none;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 8px;
+  background: rgba(15, 17, 22, 0.82);
+  color: var(--fg-dim);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateX(-8px);
+  pointer-events: none;
+  transition: opacity 160ms ease, transform 160ms ease, background 120ms, color 120ms;
+}
+.floating-btn:hover {
+  color: var(--fg);
+  background: rgba(22, 25, 34, 0.92);
+}
+body.sidebar-hidden .floating-btn,
+body.auto-narrow .floating-btn {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
 }
 .title .dot {
   width: 8px; height: 8px; border-radius: 50%;
@@ -157,6 +230,7 @@ button.primary[aria-pressed="true"] .key {
 .selected.empty { color: var(--fg-mute); }
 .selected .tag { color: var(--accent); }
 .selected .lbl { color: #ffd58a; }
+.selected .role { color: #b9c0d4; font-style: italic; }
 .selected .dim { color: var(--fg-mute); }
 .selected code {
   font-family: inherit;
@@ -197,6 +271,8 @@ button.primary[aria-pressed="true"] .key {
 }
 .stack li .tag { color: var(--accent); }
 .stack li .lbl { color: #ffd58a; }
+.stack li .role { color: #b9c0d4; font-style: italic; }
+.stack li .dim { color: var(--fg-mute); }
 .stack li .coord { color: var(--fg-mute); margin-left: auto; font-size: 11px; }
 .stack .empty {
   padding: 8px 10px;

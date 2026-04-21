@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>sim — inspector</title>
+    <title>swift-grab — inspector</title>
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
@@ -12,7 +12,12 @@
         <header>
           <div class="title">
             <span class="dot"></span>
-            <h1>sim</h1>
+            <h1>swift-grab</h1>
+            <button id="closeSidebar" class="icon-btn" title="Hide sidebar (⇧I)" aria-label="Hide sidebar">
+              <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                <path d="M10 3l-5 5 5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
           </div>
           <div class="device" id="device">—</div>
         </header>
@@ -44,6 +49,11 @@
       </aside>
 
       <main id="stage">
+        <button id="openSidebar" class="floating-btn" title="Show sidebar (⇧I)" aria-label="Show sidebar">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path d="M2 4h12M2 8h12M2 12h8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+        </button>
         <div id="screenFrame">
           <div id="screen">
             <img id="frameImg" alt="" draggable="false" />

@@ -1,5 +1,5 @@
 import type { AXNode, Snapshot } from '../../shared/protocol';
-import { hitTest } from './hittest';
+import { bestLabel, hitTest } from './hittest';
 import { InspectorOverlay } from './overlay';
 import { mockFrameDataUrl, mockSnapshot } from './mock';
 import { BridgeClient } from './ws';
@@ -20,6 +20,8 @@ const selectionBox = $('selectionBox');
 const inspectBtn = $<HTMLButtonElement>('inspectBtn');
 const refreshBtn = $<HTMLButtonElement>('refreshBtn');
 const homeBtn = $<HTMLButtonElement>('homeBtn');
+const closeSidebarBtn = $<HTMLButtonElement>('closeSidebar');
+const openSidebarBtn = $<HTMLButtonElement>('openSidebar');
 const selectedEl = $('selected');
 const stackEl = $<HTMLOListElement>('stack');
 const statusEl = $('status');
@@ -154,6 +156,14 @@ screenEl.addEventListener('click', (e) => {
 // Cmd / Ctrl to freeze hover (so you can drag over to the sidebar)
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Meta' || e.key === 'Control') frozen = true;
+  // Shift+I toggles the sidebar; plain I still toggles inspect mode.
+  if ((e.key === 'I' || e.key === 'i') && e.shiftKey) {
+    const nowHidden = !document.body.classList.contains('sidebar-hidden');
+    userOverride = nowHidden ? 'closed' : 'open';
+    applySidebarState();
+    e.preventDefault();
+    return;
+  }
   if (e.key === 'i' || e.key === 'I') setInspectMode(!inspectMode);
   if (e.key === 'Escape') { selected = null; overlay.showSelection(null); renderSelected(null, []); }
 });
@@ -164,6 +174,40 @@ window.addEventListener('keyup', (e) => {
 inspectBtn.addEventListener('click', () => setInspectMode(!inspectMode));
 refreshBtn.addEventListener('click', () => bridge.send({ type: 'inspect:refresh' }));
 homeBtn.addEventListener('click', () => bridge.send({ type: 'hid:key', key: 'home' }));
+
+// ---------- sidebar visibility ----------
+// Sidebar has three states:
+//   - shown: default on wide viewports
+//   - user-hidden: toggled via the close/open buttons (or Shift+I)
+//   - auto-narrow: viewport is too narrow to fit sidebar + sim comfortably
+// User intent wins over auto — once the user has explicitly opened or
+// closed, we stop auto-toggling until they resize into a new regime.
+const AUTO_NARROW_PX = 760;
+let userOverride: 'open' | 'closed' | null = null;
+
+function applySidebarState() {
+  const narrow = window.innerWidth < AUTO_NARROW_PX;
+  const shouldHide =
+    userOverride === 'closed' ||
+    (userOverride === null && narrow);
+  document.body.classList.toggle('sidebar-hidden', shouldHide);
+  // auto-narrow class only when it's purely auto, so CSS can style it
+  // differently later if we want (e.g., a hint that it'll come back on resize).
+  document.body.classList.toggle('auto-narrow', shouldHide && userOverride === null);
+}
+
+closeSidebarBtn.addEventListener('click', () => { userOverride = 'closed'; applySidebarState(); });
+openSidebarBtn.addEventListener('click',  () => { userOverride = 'open';   applySidebarState(); });
+window.addEventListener('resize', () => {
+  // If the user resizes across the threshold, drop their override so the
+  // layout can adapt again. This prevents "stuck hidden" when they drag
+  // the window back to wide.
+  const narrow = window.innerWidth < AUTO_NARROW_PX;
+  if (userOverride === 'closed' && !narrow) userOverride = null;
+  if (userOverride === 'open'   && narrow)  userOverride = null;
+  applySidebarState();
+});
+applySidebarState();
 
 // ---------- rendering ----------
 
@@ -209,24 +253,43 @@ function renderSelected(node: AXNode | null, path: AXNode[]) {
     return;
   }
   selectedEl.classList.remove('empty');
-  const label = node.label ? ` <span class="lbl">“${escapeHtml(node.label)}”</span>` : '';
-  const id = node.identifier ? ` <span class="dim">#${escapeHtml(node.identifier)}</span>` : '';
+
+  const bl = bestLabel(node);
+  const labelHtml =
+    bl.kind === 'label' ? ` <span class="lbl">“${escapeHtml(bl.text)}”</span>`
+    : bl.kind === 'role' ? ` <span class="role">${escapeHtml(bl.text)}</span>`
+    : bl.kind === 'id'   ? ` <span class="dim">#${escapeHtml(bl.text)}</span>`
+    : '';
+  // When we fall back to roleDescription/id, also show identifier if distinct.
+  const extraId =
+    bl.kind !== 'id' && node.identifier
+      ? ` <span class="dim">#${escapeHtml(node.identifier)}</span>` : '';
+  const valueBit = node.value
+    ? `<div class="meta"><span class="dim">value:</span> <code>${escapeHtml(node.value)}</code></div>`
+    : '';
+
   selectedEl.innerHTML = `
-    <div><span class="tag">&lt;${escapeHtml(node.type)} /&gt;</span>${label}${id}</div>
+    <div><span class="tag">&lt;${escapeHtml(node.type)} /&gt;</span>${labelHtml}${extraId}</div>
     <div class="meta">
       <span>${Math.round(node.frame.w)}×${Math.round(node.frame.h)}</span>
       <span>@ ${Math.round(node.frame.x)}, ${Math.round(node.frame.y)}</span>
       <span class="dim">${escapeHtml(node.role)}</span>
     </div>
+    ${valueBit}
   `;
 
   stackEl.innerHTML = '';
   path.forEach((n, i) => {
     const li = document.createElement('li');
     if (i === path.length - 1) li.className = 'deepest';
-    const label = n.label ? ` <span class="lbl">“${escapeHtml(n.label)}”</span>` : '';
+    const bl = bestLabel(n);
+    const labelHtml =
+      bl.kind === 'label' ? ` <span class="lbl">“${escapeHtml(bl.text)}”</span>`
+      : bl.kind === 'role' ? ` <span class="role">${escapeHtml(bl.text)}</span>`
+      : bl.kind === 'id'   ? ` <span class="dim">#${escapeHtml(bl.text)}</span>`
+      : '';
     li.innerHTML = `
-      <span class="tag">&lt;${escapeHtml(n.type)} /&gt;</span>${label}
+      <span class="tag">&lt;${escapeHtml(n.type)} /&gt;</span>${labelHtml}
       <span class="coord">${Math.round(n.frame.w)}×${Math.round(n.frame.h)}</span>
     `;
     li.addEventListener('mouseenter', () => overlay.showHover(n));
