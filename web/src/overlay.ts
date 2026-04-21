@@ -121,6 +121,17 @@ export class InspectorOverlay {
     };
   }
 
+  toOverlayRect(f: Frame) {
+    const r = this.toClientRect(f);
+    const screenRect = this.screen.getBoundingClientRect();
+    return {
+      x: r.x - screenRect.left,
+      y: r.y - screenRect.top,
+      w: r.w,
+      h: r.h,
+    };
+  }
+
   private toClientRect(f: Frame) {
     const imgRect = this.frameImg.getBoundingClientRect();
     const base = this.content;

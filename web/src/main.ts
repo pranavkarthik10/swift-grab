@@ -219,18 +219,19 @@ function updateAutoTransport() {
 
 function renderAxDom() {
   axDomLayer.innerHTML = '';
+  if (frameImg.naturalWidth <= 0 || frameImg.naturalHeight <= 0) return;
   for (const node of snapshot.nodes) {
     if (node.frame.w <= 0 || node.frame.h <= 0) continue;
-    const rect = overlay.toFramePercentRect(node.frame);
+    const rect = overlay.toOverlayRect(node.frame);
     const el = document.createElement('button');
     const label = bestLabel(node);
     const spoken = label.text ? `${node.type} ${label.text}` : node.type;
     el.type = 'button';
     el.className = `ax-dom-node ${node.role === 'AXGroup' ? 'group' : ''}`.trim();
-    el.style.left = `${rect.x}%`;
-    el.style.top = `${rect.y}%`;
-    el.style.width = `${rect.w}%`;
-    el.style.height = `${rect.h}%`;
+    el.style.left = `${rect.x}px`;
+    el.style.top = `${rect.y}px`;
+    el.style.width = `${Math.max(2, rect.w)}px`;
+    el.style.height = `${Math.max(2, rect.h)}px`;
     el.dataset.axNodeId = node.id;
     el.dataset.axRole = node.role;
     el.dataset.axType = node.type;
@@ -474,6 +475,7 @@ function setInspectMode(on: boolean) {
   }
 
   updateAutoTransport();
+  if (on) bridge.send({ type: 'inspect:refresh' });
 }
 
 function setStatus(kind: 'connecting' | 'live' | 'mock' | 'err', note?: string) {
