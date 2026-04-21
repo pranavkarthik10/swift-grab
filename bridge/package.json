@@ -1,5 +1,5 @@
 {
-  "name": "bridge",
+  "name": "swift-grab-bridge",
   "private": true,
   "version": "0.1.0",
   "type": "module",

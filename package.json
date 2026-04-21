@@ -5,9 +5,9 @@
   "type": "module",
   "workspaces": ["web", "bridge"],
   "scripts": {
-    "dev:web": "bun --filter web dev",
-    "dev:bridge": "bun --filter bridge dev",
-    "build:web": "bun --filter web build",
+    "dev:web": "bun --filter swift-grab-web dev",
+    "dev:bridge": "bun --filter swift-grab-bridge dev",
+    "build:web": "bun --filter swift-grab-web build",
     "typecheck": "bun --filter '*' typecheck"
   },
   "devDependencies": {
