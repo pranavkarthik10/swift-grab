@@ -397,11 +397,11 @@ body.auto-narrow #stage {
   margin: 0;
   padding: 0;
   border-radius: 3px;
-  border: 1px solid transparent;
-  background: transparent;
+  border: 1px solid rgba(0, 0, 0, 0.001);
+  background: rgba(0, 0, 0, 0.001);
   color: transparent;
   appearance: none;
-  opacity: 0;
+  opacity: 0.001;
 }
 
 /* hover overlay */

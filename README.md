@@ -11,8 +11,9 @@ It works with SwiftUI, UIKit, React Native, Flutter, and anything else that surf
 - Mirrors a booted iOS Simulator in the browser.
 - Lets you inspect on-screen elements through the accessibility tree.
 - Refines selections with point-based lookup when needed.
+- Automatically copies an agent-ready context block when you select an element.
 - Supports pass-through taps, swipes, text input, and hardware-style buttons.
-- Includes `Cursor mode`, which pushes the AX tree into the page as real DOM nodes so tools like Cursor’s picker can target simulator elements from the browser DOM.
+- Mirrors the AX tree into latent DOM nodes so tools like Cursor’s picker can target simulator elements from the page DOM.
 - Falls back to mock mode when no simulator or bridge is connected, so you can still demo the UI.
 
 ## Why It Exists
@@ -33,16 +34,8 @@ That means you can:
 Use `Inspect` when you want hover highlighting, selection, and the component stack in the sidebar.
 
 - Hover shows the deepest AX node under the cursor.
-- Click selects an element and logs a structured payload for agents.
+- Click selects an element, logs a structured payload for agents, and copies an agent-ready context block to the clipboard.
 - A point-based AX query runs on selection to improve precision when the flat tree is ambiguous.
-
-### Cursor mode
-
-Use `Cursor mode` when you want browser-native DOM picking.
-
-- The current AX tree is mirrored into absolutely-positioned DOM nodes on top of the simulator frame.
-- Each mirrored node carries useful labels and metadata.
-- This is designed for tools like Cursor’s picker that need real DOM elements, not just a painted overlay.
 
 ### Interaction mode
 
@@ -58,7 +51,6 @@ Turn inspect off to interact with the simulator.
 | Key            | Action                          |
 | -------------- | ------------------------------- |
 | `I`            | Toggle Inspect mode             |
-| `C`            | Toggle Cursor mode              |
 | `R`            | Refresh the accessibility tree  |
 | `H`            | Press Home                      |
 | `Esc`          | Clear selection                 |
@@ -118,7 +110,7 @@ The bridge streams:
 
 In `Auto` video mode:
 
-- Inspect mode and Cursor mode prefer screenshot-backed alignment for accurate mapping.
+- Inspect mode prefers screenshot-backed alignment for accurate mapping.
 - Interaction mode prefers ScreenCaptureKit when available for smoother live video.
 
 You can also force `CaptureKit` or `simctl` from the UI.
@@ -151,6 +143,5 @@ Environment variables:
 ## Current Limitations
 
 - The underlying AX tree can still collapse some grouped controls, especially complex nav and tab bars.
-- Cursor mode mirrors the AX tree into DOM, but it can only expose what the simulator accessibility APIs provide.
+- The latent DOM mirror can only expose what the simulator accessibility APIs provide.
 - If `idb` is unavailable or unstable, point inspection and input control will degrade or stop working.
-

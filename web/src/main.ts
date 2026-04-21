@@ -63,6 +63,7 @@ let lastFrameSource: 'capturekit' | 'screenshot' | 'none' = 'none';
 let lastHelloTransport: 'capturekit' | 'screenshot' | 'none' = 'none';
 let pointInspectSeq = 0;
 let selectedPointInspectSeq = 0;
+let lastCopiedContext = '';
 
 const bridge = new BridgeClient(wsUrl, {
   onHello: (msg) => {
@@ -196,6 +197,7 @@ function selectNode(node: AXNode, path = pathForNode(node)) {
   overlay.showSelection(node);
   renderSelected(node, path);
   logSelectionForAgent(node, path);
+  void copySelectionContext(node, path);
 }
 
 function selectOrToggleNode(node: AXNode, path = pathForNode(node)) {
@@ -570,6 +572,46 @@ function logSelectionForAgent(node: AXNode | null, path: AXNode[]) {
     })),
   };
   console.log('[selected]', payload);
+}
+
+async function copySelectionContext(node: AXNode, path: AXNode[]) {
+  const text = buildSelectionContext(node, path);
+  if (!text || text === lastCopiedContext) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    lastCopiedContext = text;
+    console.log('[copied] selection context');
+  } catch (err) {
+    console.warn('[clipboard] failed to copy selection context', err);
+  }
+}
+
+function buildSelectionContext(node: AXNode, path: AXNode[]): string {
+  const lines = [
+    'Current simulator UI selection:',
+    `- device: ${snapshot.deviceId}`,
+    `- tree source: ${snapshot.source}`,
+    `- selected: ${formatNodeForAgent(node)}`,
+  ];
+  if (node.value) lines.push(`- value: ${node.value}`);
+  if (node.identifier) lines.push(`- identifier: ${node.identifier}`);
+  if (node.subrole) lines.push(`- subrole: ${node.subrole}`);
+  if (node.help) lines.push(`- help: ${node.help}`);
+  if (node.customActions.length) lines.push(`- custom actions: ${node.customActions.join(', ')}`);
+  if (path.length > 1) {
+    lines.push('- ancestors:');
+    for (const ancestor of path.slice(0, -1)) {
+      lines.push(`  - ${formatNodeForAgent(ancestor)}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+function formatNodeForAgent(node: AXNode): string {
+  const label = bestLabel(node);
+  const labelBit = label.text ? ` "${label.text}"` : '';
+  const idBit = node.identifier ? ` #${node.identifier}` : '';
+  return `<${node.type} />${labelBit}${idBit} ${node.role} @ ${Math.round(node.frame.x)},${Math.round(node.frame.y)} ${Math.round(node.frame.w)}x${Math.round(node.frame.h)}`;
 }
 
 function escapeHtml(s: string): string {
