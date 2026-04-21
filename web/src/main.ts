@@ -236,9 +236,12 @@ function renderAxDom() {
     el.dataset.axType = node.type;
     if (node.label) el.dataset.axLabel = node.label;
     if (node.identifier) el.dataset.axIdentifier = node.identifier;
+    el.dataset.axFrame = `${Math.round(node.frame.x)},${Math.round(node.frame.y)},${Math.round(node.frame.w)},${Math.round(node.frame.h)}`;
     el.setAttribute('aria-label', spoken);
+    el.setAttribute('aria-description', `${node.role} at ${Math.round(node.frame.x)}, ${Math.round(node.frame.y)} sized ${Math.round(node.frame.w)} by ${Math.round(node.frame.h)}`);
     el.title = spoken;
     el.tabIndex = -1;
+    el.textContent = spoken;
     axDomLayer.appendChild(el);
   }
 }
