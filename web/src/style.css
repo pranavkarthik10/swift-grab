@@ -383,6 +383,27 @@ body.auto-narrow #stage {
 }
 #frameImg.hidden { display: none; }
 
+.ax-dom-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+.ax-dom-node {
+  position: absolute;
+  display: block;
+  min-width: 2px;
+  min-height: 2px;
+  margin: 0;
+  padding: 0;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: transparent;
+  appearance: none;
+  opacity: 0;
+}
+
 /* hover overlay */
 .overlay {
   position: absolute;

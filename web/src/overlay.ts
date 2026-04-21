@@ -105,6 +105,22 @@ export class InspectorOverlay {
     this.selection.style.height = `${r.h}px`;
   }
 
+  toFramePercentRect(f: Frame) {
+    const base = this.content;
+    const fw = this.frameW || this.frameImg.naturalWidth || 1;
+    const fh = this.frameH || this.frameImg.naturalHeight || 1;
+    const sx = base.x + (f.x / this.simW) * base.w;
+    const sy = base.y + (f.y / this.simH) * base.h;
+    const sw = (f.w / this.simW) * base.w;
+    const sh = (f.h / this.simH) * base.h;
+    return {
+      x: (sx / fw) * 100,
+      y: (sy / fh) * 100,
+      w: (sw / fw) * 100,
+      h: (sh / fh) * 100,
+    };
+  }
+
   private toClientRect(f: Frame) {
     const imgRect = this.frameImg.getBoundingClientRect();
     const base = this.content;

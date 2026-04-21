@@ -1,77 +1,156 @@
 # swift-grab
 
-Browser-based inspector for the iOS Simulator.
+`swift-grab` turns the iOS Simulator into something an agent can actually work with.
 
-Stream a running simulator into a web page and hover any element to see
-the deepest accessibility node under the cursor — type, label, frame,
-ancestor chain. Built to give coding agents (Cursor, Codex, Claude) rich
-context about what the user just tapped, without requiring source maps
-or any code changes to the target app.
+Open a browser tab, mirror the simulator live, and inspect what is on screen with real accessibility metadata: labels, roles, frames, ancestor chains, and point-level refinement when the screen dump is too coarse. It is built for coding workflows where you want an AI assistant to understand a running app without adding instrumentation to the app itself.
 
-Works on **any** app running in the simulator: SwiftUI, UIKit, React
-Native, Flutter, or something you don't even own. The inspector reads the
-accessibility tree, which every app publishes for free.
+It works with SwiftUI, UIKit, React Native, Flutter, and anything else that surfaces accessibility data inside the simulator.
 
-## Layout
+## What It Does
 
-```
-swift-grab/
-├── shared/protocol.ts   # WS message types + AXNode shape
-├── swift-grab-web/      # Vite + TS frontend (inspector UI)
-└── swift-grab-bridge/   # Bun WS server wrapping simctl + idb
-```
+- Mirrors a booted iOS Simulator in the browser.
+- Lets you inspect on-screen elements through the accessibility tree.
+- Refines selections with point-based lookup when needed.
+- Supports pass-through taps, swipes, text input, and hardware-style buttons.
+- Includes `Cursor mode`, which pushes the AX tree into the page as real DOM nodes so tools like Cursor’s picker can target simulator elements from the browser DOM.
+- Falls back to mock mode when no simulator or bridge is connected, so you can still demo the UI.
 
-## Quickstart
+## Why It Exists
+
+Most agent tools can read code, but they struggle with a live mobile UI. `swift-grab` closes that gap by giving the browser a live view of the simulator plus a structured model of what is on screen.
+
+That means you can:
+
+- point at a control and get its accessible label and bounds
+- hand an agent concrete UI context instead of screenshots alone
+- inspect apps you do not own or cannot modify
+- drive the simulator from the same surface you inspect
+
+## Modes
+
+### Inspect mode
+
+Use `Inspect` when you want hover highlighting, selection, and the component stack in the sidebar.
+
+- Hover shows the deepest AX node under the cursor.
+- Click selects an element and logs a structured payload for agents.
+- A point-based AX query runs on selection to improve precision when the flat tree is ambiguous.
+
+### Cursor mode
+
+Use `Cursor mode` when you want browser-native DOM picking.
+
+- The current AX tree is mirrored into absolutely-positioned DOM nodes on top of the simulator frame.
+- Each mirrored node carries useful labels and metadata.
+- This is designed for tools like Cursor’s picker that need real DOM elements, not just a painted overlay.
+
+### Interaction mode
+
+Turn inspect off to interact with the simulator.
+
+- Click sends a tap.
+- Mouse drag sends a swipe.
+- Wheel scrolling sends a coalesced swipe for list navigation.
+
+## Keyboard Shortcuts
+
+
+| Key            | Action                          |
+| -------------- | ------------------------------- |
+| `I`            | Toggle Inspect mode             |
+| `C`            | Toggle Cursor mode              |
+| `R`            | Refresh the accessibility tree  |
+| `H`            | Press Home                      |
+| `Esc`          | Clear selection                 |
+| `Cmd` / `Ctrl` | Freeze current hover while held |
+| `Shift + I`    | Hide or show the sidebar        |
+
+
+## Quick Start
 
 ```bash
 bun install
 
-# Terminal 1 — web UI (works standalone with mock data)
+# Terminal 1
 bun run dev:web
-# open http://localhost:5173
 
-# Terminal 2 — bridge (optional; needs a booted simulator)
+# Terminal 2
 bun run dev:bridge
 ```
 
-The web UI starts in **mock mode** if no bridge is reachable, so you can
-play with the inspector UI without any simulator at all.
+Then open [http://localhost:5173](http://localhost:5173).
 
-## Real-sim requirements
+If the bridge is offline, the web app starts in mock mode automatically.
 
-- A booted iOS simulator (`xcrun simctl boot <udid>` or open Simulator.app)
-- `xcrun simctl` — ships with Xcode, used for framebuffer screenshots
-- [`idb`](https://fbidb.io) — needed for AX tree and tap injection:
+## Requirements
 
-  ```bash
-  brew install facebook/fb/idb-companion
-  pipx install fb-idb
-  ```
+For a real simulator session:
 
-  The bridge will auto-run `idb connect <udid>` against the booted sim on
-  startup, so you don't need to connect manually.
+- Xcode / `xcrun simctl`
+- a booted iOS Simulator
+- `[idb](https://fbidb.io)` for accessibility inspection and input injection
 
-Without `idb` the bridge will still stream frames, but hover-inspect and
-tap-injection won't work (use mock mode to try the UI).
+Install `idb` with:
 
-## Protocol
+```bash
+brew install facebook/fb/idb-companion
+pipx install fb-idb
+```
 
-Control plane is JSON over a single WebSocket at `ws://localhost:7878/ws`.
-Binary WS messages on the same socket carry JPEG frames. See
-`shared/protocol.ts` for the full message set.
+The bridge will automatically run `idb connect <udid>` for the active simulator target.
 
-Environment variables for the bridge:
+Without `idb`, you still get video frames, but not AX inspection or input injection.
 
-| Var            | Default | What it does                              |
-|----------------|---------|-------------------------------------------|
-| `PORT`         | `7878`  | WebSocket port                            |
-| `FRAME_MS`     | `120`   | Min ms between screenshots (floor; simctl caps ~220ms) |
-| `FRAME_FORMAT` | `jpeg`  | `jpeg` (fast/small) or `png` (lossless)   |
+## Architecture
 
-## Keyboard
+`swift-grab` has two pieces:
 
-| Key        | Action                                                      |
-|------------|-------------------------------------------------------------|
-| `I`        | Toggle inspect mode (hover highlights vs. pass-through tap) |
-| `Esc`      | Clear selection                                             |
-| `Cmd/Ctrl` | Freeze the current hover (drag to sidebar without losing it)|
+- `web/`: the browser UI, built with Vite + TypeScript
+- `bridge/`: a Bun websocket bridge that talks to `simctl`, `idb`, and ScreenCaptureKit
+
+The bridge streams:
+
+- binary image frames for the simulator view
+- JSON snapshots for the accessibility tree
+- JSON responses for point inspection and control messages
+
+## Transport Behavior
+
+In `Auto` video mode:
+
+- Inspect mode and Cursor mode prefer screenshot-backed alignment for accurate mapping.
+- Interaction mode prefers ScreenCaptureKit when available for smoother live video.
+
+You can also force `CaptureKit` or `simctl` from the UI.
+
+## Bridge Configuration
+
+Environment variables:
+
+
+| Var                 | Default | Purpose                                           |
+| ------------------- | ------- | ------------------------------------------------- |
+| `PORT`              | `7878`  | WebSocket / health server port                    |
+| `FRAME_MS`          | `120`   | Screenshot cadence for the `simctl` fallback      |
+| `FRAME_FORMAT`      | `jpeg`  | Screenshot encoding: `jpeg` or `png`              |
+| `CAPTURE_FPS`       | `50`    | Target ScreenCaptureKit frame rate                |
+| `CAPTURE_QUALITY`   | `0.7`   | JPEG quality for ScreenCaptureKit frames          |
+| `CAPTURE_MAX_WIDTH` | `1200`  | Max streamed frame width                          |
+| `CAPTURE=0`         | unset   | Disable ScreenCaptureKit and use screenshots only |
+
+
+## Good Fits
+
+`swift-grab` is especially useful for:
+
+- agent-assisted debugging sessions
+- UI inspection without source access
+- pairing with Cursor, Codex, or Claude on iOS tasks
+- quickly checking what an app is actually exposing via accessibility
+
+## Current Limitations
+
+- The underlying AX tree can still collapse some grouped controls, especially complex nav and tab bars.
+- Cursor mode mirrors the AX tree into DOM, but it can only expose what the simulator accessibility APIs provide.
+- If `idb` is unavailable or unstable, point inspection and input control will degrade or stop working.
+

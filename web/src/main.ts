@@ -21,6 +21,7 @@ const inspectBtn = $<HTMLButtonElement>('inspectBtn');
 const refreshBtn = $<HTMLButtonElement>('refreshBtn');
 const homeBtn = $<HTMLButtonElement>('homeBtn');
 const transportSel = $<HTMLSelectElement>('transportSel');
+const axDomLayer = $('axDomLayer');
 const closeSidebarBtn = $<HTMLButtonElement>('closeSidebar');
 const openSidebarBtn = $<HTMLButtonElement>('openSidebar');
 const selectedEl = $('selected');
@@ -80,13 +81,11 @@ const bridge = new BridgeClient(wsUrl, {
     setSource(s.source);
   },
   onPointInspect: (msg) => {
-    if (msg.requestId !== selectedPointInspectSeq) return;
+    if (!inspectMode || msg.requestId !== selectedPointInspectSeq) return;
     const path = mergePath(hitTest(snapshot.nodes, msg.x, msg.y), msg.node);
     const leaf = path.at(-1) ?? null;
-    selected = leaf;
-    overlay.showSelection(selected);
-    renderSelected(selected, path);
-    logSelectionForAgent(selected, path);
+    if (!leaf) return;
+    selectNode(leaf, path);
   },
   onFrame: (blob) => {
     if (!hasRealFrames) console.log('[frame] first frame', blob.size, 'bytes', blob.type);
@@ -135,8 +134,10 @@ frameImg.addEventListener('load', () => {
   }
   if (frameImg.naturalWidth > 0 && frameImg.naturalHeight > 0) {
     overlay.setFrameMeta(frameImg.naturalWidth, frameImg.naturalHeight, lastFrameSource);
+    renderAxDom();
   }
 });
+window.addEventListener('resize', () => renderAxDom());
 
 function clearMockState() {
   // When connected to a real bridge, wipe mock nodes so hit-test doesn't
@@ -144,6 +145,7 @@ function clearMockState() {
   snapshot = { ...mockSnapshot, nodes: [], source: 'none' };
   clearSelection();
   hovered = [];
+  axDomLayer.innerHTML = '';
   overlay.showHover(null);
   setSource('none');
 }
@@ -152,6 +154,7 @@ bridge.connect();
 
 function clearSelection() {
   selected = null;
+  selectedPointInspectSeq = 0;
   overlay.showSelection(null);
   renderSelected(null, []);
 }
@@ -180,6 +183,62 @@ function sameNode(a: AXNode, b: AXNode): boolean {
       a.frame.h === b.frame.h
     )
   );
+}
+
+function pathForNode(node: AXNode): AXNode[] {
+  const midX = node.frame.x + node.frame.w / 2;
+  const midY = node.frame.y + node.frame.h / 2;
+  return mergePath(hitTest(snapshot.nodes, midX, midY), node);
+}
+
+function selectNode(node: AXNode, path = pathForNode(node)) {
+  selected = node;
+  overlay.showSelection(node);
+  renderSelected(node, path);
+  logSelectionForAgent(node, path);
+}
+
+function selectOrToggleNode(node: AXNode, path = pathForNode(node)) {
+  if (selected && sameNode(selected, node)) {
+    clearSelection();
+    return;
+  }
+  selectNode(node, path);
+}
+
+function updateAutoTransport() {
+  if (transportPref !== 'auto') return;
+  const want = inspectMode ? 'screenshot' : 'capturekit';
+  if (lastHelloTransport !== want) {
+    bridge.send({ type: 'video:transport', transport: want });
+    lastHelloTransport = want;
+  }
+}
+
+function renderAxDom() {
+  axDomLayer.innerHTML = '';
+  for (const node of snapshot.nodes) {
+    if (node.frame.w <= 0 || node.frame.h <= 0) continue;
+    const rect = overlay.toFramePercentRect(node.frame);
+    const el = document.createElement('button');
+    const label = bestLabel(node);
+    const spoken = label.text ? `${node.type} ${label.text}` : node.type;
+    el.type = 'button';
+    el.className = `ax-dom-node ${node.role === 'AXGroup' ? 'group' : ''}`.trim();
+    el.style.left = `${rect.x}%`;
+    el.style.top = `${rect.y}%`;
+    el.style.width = `${rect.w}%`;
+    el.style.height = `${rect.h}%`;
+    el.dataset.axNodeId = node.id;
+    el.dataset.axRole = node.role;
+    el.dataset.axType = node.type;
+    if (node.label) el.dataset.axLabel = node.label;
+    if (node.identifier) el.dataset.axIdentifier = node.identifier;
+    el.setAttribute('aria-label', spoken);
+    el.title = spoken;
+    el.tabIndex = -1;
+    axDomLayer.appendChild(el);
+  }
 }
 
 // ---------- inspect interactions ----------
@@ -216,14 +275,8 @@ screenEl.addEventListener('click', (e) => {
       clearSelection();
       return;
     }
-    if (selected && sameNode(selected, next)) {
-      clearSelection();
-      return;
-    }
-    selected = next;
-    overlay.showSelection(selected);
-    renderSelected(selected, path);
-    logSelectionForAgent(selected, path);
+    selectOrToggleNode(next, path);
+    if (!selected) return;
     requestPointInspect(p);
   } else {
     // passthrough tap → sim
@@ -392,6 +445,7 @@ applySidebarState();
 function applySnapshot(s: Snapshot) {
   snapshot = s;
   overlay.setSimSize(s.simSize.w, s.simSize.h);
+  renderAxDom();
   if (selected) {
     const still = s.nodes.find(n => n.id === selected!.id) ?? null;
     if (!still) {
@@ -414,16 +468,7 @@ function setInspectMode(on: boolean) {
     clearSelection();
   }
 
-  // In AUTO mode: use simctl frames for inspect (accurate AX mapping),
-  // and CaptureKit for interaction (fast, low-latency).
-  if (transportPref === 'auto') {
-    const want = on ? 'screenshot' : 'capturekit';
-    // Only send if it would be a change (avoid spamming).
-    if (lastHelloTransport !== want) {
-      bridge.send({ type: 'video:transport', transport: want });
-      lastHelloTransport = want;
-    }
-  }
+  updateAutoTransport();
 }
 
 function setStatus(kind: 'connecting' | 'live' | 'mock' | 'err', note?: string) {
@@ -503,13 +548,7 @@ function renderSelected(node: AXNode | null, path: AXNode[]) {
     `;
     li.addEventListener('mouseenter', () => overlay.showHover(n));
     li.addEventListener('click', () => {
-      if (selected && sameNode(selected, n)) {
-        clearSelection();
-        return;
-      }
-      selected = n;
-      overlay.showSelection(n);
-      renderSelected(n, path.slice(0, i + 1));
+      selectOrToggleNode(n, path.slice(0, i + 1));
     });
     stackEl.appendChild(li);
   });
