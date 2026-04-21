@@ -389,6 +389,10 @@ body.auto-narrow #stage {
   pointer-events: none;
   z-index: 1;
 }
+.ax-dom-viewport {
+  position: absolute;
+  pointer-events: none;
+}
 .ax-dom-node {
   position: absolute;
   display: block;
@@ -400,8 +404,11 @@ body.auto-narrow #stage {
   border: 1px solid rgba(0, 0, 0, 0.001);
   background: rgba(0, 0, 0, 0.001);
   color: transparent;
-  appearance: none;
   opacity: 0.001;
+  pointer-events: none;
+}
+#screen.inspect .ax-dom-node {
+  pointer-events: auto;
 }
 
 /* hover overlay */
