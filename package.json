@@ -1,0 +1,16 @@
+{
+  "name": "swift-grab",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": ["web", "bridge"],
+  "scripts": {
+    "dev:web": "bun --filter web dev",
+    "dev:bridge": "bun --filter bridge dev",
+    "build:web": "bun --filter web build",
+    "typecheck": "bun --filter '*' typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}
