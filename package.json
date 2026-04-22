@@ -5,6 +5,7 @@
   "type": "module",
   "workspaces": ["web", "bridge"],
   "scripts": {
+    "dev": "bun --filter sim-grab-web dev & bun --filter sim-grab-bridge dev & wait",
     "dev:web": "bun --filter sim-grab-web dev",
     "dev:bridge": "bun --filter sim-grab-bridge dev",
     "build:web": "bun --filter sim-grab-web build",

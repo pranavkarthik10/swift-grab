@@ -62,6 +62,12 @@ Turn inspect off to interact with the simulator.
 
 ```bash
 bun install
+bun run dev
+```
+
+Or run the two sides separately:
+
+```bash
 
 # Terminal 1
 bun run dev:web
