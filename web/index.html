@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>swift-grab — inspector</title>
+    <title>sim-grab — inspector</title>
     <link rel="stylesheet" href="./src/style.css" />
   </head>
   <body>
@@ -12,7 +12,7 @@
         <header>
           <div class="title">
             <span class="dot"></span>
-            <h1>swift-grab</h1>
+            <h1>sim-grab</h1>
             <button id="closeSidebar" class="icon-btn" title="Hide sidebar (⇧I)" aria-label="Hide sidebar">
               <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
                 <path d="M10 3l-5 5 5 5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
@@ -73,7 +73,9 @@
                  JPEGs) or simctl screenshots (fallback, ~5-8fps). The
                  overlay + selection box sit on top. -->
             <img id="frameImg" alt="" draggable="false" />
-            <div id="axDomLayer" class="ax-dom-layer"></div>
+            <div id="axDomLayer" class="ax-dom-layer">
+              <div id="axDomViewport" class="ax-dom-viewport"></div>
+            </div>
             <div id="overlay" class="overlay hidden">
               <div id="overlayBox" class="overlay-box"></div>
               <div id="overlayLabel" class="overlay-label"></div>

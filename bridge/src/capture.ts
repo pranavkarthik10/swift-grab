@@ -1,6 +1,6 @@
 // ScreenCaptureKit bridge.
 //
-// Spawns `bridge/capture/.build/release/swift-grab-capture` and parses its
+// Spawns `bridge/capture/.build/release/sim-grab-capture` and parses its
 // framed stdout stream:
 //
 //   [4-byte BE length][payload]
@@ -41,7 +41,7 @@ export type CaptureOptions = {
 // and when the bridge is bundled somewhere else as long as the capture
 // binary is shipped alongside it.
 export function captureBinaryPath(): string {
-  return resolve(import.meta.dir, '..', 'capture', '.build', 'release', 'swift-grab-capture');
+  return resolve(import.meta.dir, '..', 'capture', '.build', 'release', 'sim-grab-capture');
 }
 
 export function captureAvailable(): boolean {

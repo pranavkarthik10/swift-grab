@@ -2,18 +2,18 @@
 import PackageDescription
 
 let package = Package(
-    name: "swift-grab-capture",
+    name: "sim-grab-capture",
     platforms: [
         // ScreenCaptureKit needs 12.3+, modern async variants settle around 14.
         .macOS(.v14),
     ],
     products: [
-        .executable(name: "swift-grab-capture", targets: ["swift-grab-capture"]),
+        .executable(name: "sim-grab-capture", targets: ["sim-grab-capture"]),
     ],
     targets: [
         .executableTarget(
-            name: "swift-grab-capture",
-            path: "Sources/swift-grab-capture"
+            name: "sim-grab-capture",
+            path: "Sources/sim-grab-capture"
         ),
     ]
 )

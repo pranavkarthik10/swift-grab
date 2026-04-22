@@ -1,14 +1,14 @@
 {
-  "name": "swift-grab",
+  "name": "sim-grab",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "workspaces": ["web", "bridge"],
   "scripts": {
-    "dev:web": "bun --filter swift-grab-web dev",
-    "dev:bridge": "bun --filter swift-grab-bridge dev",
-    "build:web": "bun --filter swift-grab-web build",
-    "build:capture": "bun --filter swift-grab-bridge build:capture",
+    "dev:web": "bun --filter sim-grab-web dev",
+    "dev:bridge": "bun --filter sim-grab-bridge dev",
+    "build:web": "bun --filter sim-grab-web build",
+    "build:capture": "bun --filter sim-grab-bridge build:capture",
     "typecheck": "bun --filter '*' typecheck"
   },
   "devDependencies": {

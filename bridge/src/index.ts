@@ -194,7 +194,7 @@ const server = Bun.serve({
       });
     }
     return new Response(
-      `swift-grab bridge\n\nWebSocket: ws://localhost:${PORT}/ws\nHealth:    http://localhost:${PORT}/health\n`,
+      `sim-grab bridge\n\nWebSocket: ws://localhost:${PORT}/ws\nHealth:    http://localhost:${PORT}/health\n`,
       { headers: { 'content-type': 'text/plain; charset=utf-8' } },
     );
   },

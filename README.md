@@ -1,6 +1,6 @@
-# swift-grab
+# sim-grab
 
-`swift-grab` turns the iOS Simulator into something an agent can actually work with.
+`sim-grab` turns the iOS Simulator into something an agent can actually work with.
 
 Open a browser tab, mirror the simulator live, and inspect what is on screen with real accessibility metadata: labels, roles, frames, ancestor chains, and point-level refinement when the screen dump is too coarse. It is built for coding workflows where you want an AI assistant to understand a running app without adding instrumentation to the app itself.
 
@@ -18,7 +18,7 @@ It works with SwiftUI, UIKit, React Native, Flutter, and anything else that surf
 
 ## Why It Exists
 
-Most agent tools can read code, but they struggle with a live mobile UI. `swift-grab` closes that gap by giving the browser a live view of the simulator plus a structured model of what is on screen.
+Most agent tools can read code, but they struggle with a live mobile UI. `sim-grab` closes that gap by giving the browser a live view of the simulator plus a structured model of what is on screen.
 
 That means you can:
 
@@ -95,7 +95,7 @@ Without `idb`, you still get video frames, but not AX inspection or input inject
 
 ## Architecture
 
-`swift-grab` has two pieces:
+`sim-grab` has two pieces:
 
 - `web/`: the browser UI, built with Vite + TypeScript
 - `bridge/`: a Bun websocket bridge that talks to `simctl`, `idb`, and ScreenCaptureKit
@@ -133,7 +133,7 @@ Environment variables:
 
 ## Good Fits
 
-`swift-grab` is especially useful for:
+`sim-grab` is especially useful for:
 
 - agent-assisted debugging sessions
 - UI inspection without source access

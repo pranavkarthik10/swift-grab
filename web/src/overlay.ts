@@ -132,6 +132,19 @@ export class InspectorOverlay {
     };
   }
 
+  getOverlayContentRect() {
+    const imgRect = this.frameImg.getBoundingClientRect();
+    const screenRect = this.screen.getBoundingClientRect();
+    const fw = this.frameW || this.frameImg.naturalWidth || 1;
+    const fh = this.frameH || this.frameImg.naturalHeight || 1;
+    return {
+      x: (this.content.x / fw) * imgRect.width + (imgRect.left - screenRect.left),
+      y: (this.content.y / fh) * imgRect.height + (imgRect.top - screenRect.top),
+      w: (this.content.w / fw) * imgRect.width,
+      h: (this.content.h / fh) * imgRect.height,
+    };
+  }
+
   private toClientRect(f: Frame) {
     const imgRect = this.frameImg.getBoundingClientRect();
     const base = this.content;

@@ -1,4 +1,4 @@
-// swift-grab-capture
+// sim-grab-capture
 // -------------------
 // Captures the iOS Simulator.app window via ScreenCaptureKit and streams
 // JPEG frames out on stdout. This is the same underlying mechanism
@@ -121,7 +121,7 @@ final class Capture: NSObject, SCStreamDelegate, SCStreamOutput, @unchecked Send
             try await Task.sleep(nanoseconds: 1_000_000_000)
         }
         throw NSError(
-            domain: "swift-grab-capture", code: 1,
+            domain: "sim-grab-capture", code: 1,
             userInfo: [NSLocalizedDescriptionKey: "simulator window not found"]
         )
     }

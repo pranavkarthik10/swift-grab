@@ -22,6 +22,7 @@ const refreshBtn = $<HTMLButtonElement>('refreshBtn');
 const homeBtn = $<HTMLButtonElement>('homeBtn');
 const transportSel = $<HTMLSelectElement>('transportSel');
 const axDomLayer = $('axDomLayer');
+const axDomViewport = $('axDomViewport');
 const closeSidebarBtn = $<HTMLButtonElement>('closeSidebar');
 const openSidebarBtn = $<HTMLButtonElement>('openSidebar');
 const selectedEl = $('selected');
@@ -146,7 +147,7 @@ function clearMockState() {
   snapshot = { ...mockSnapshot, nodes: [], source: 'none' };
   clearSelection();
   hovered = [];
-  axDomLayer.innerHTML = '';
+  axDomViewport.innerHTML = '';
   overlay.showHover(null);
   setSource('none');
 }
@@ -218,20 +219,23 @@ function updateAutoTransport() {
 }
 
 function renderAxDom() {
-  axDomLayer.innerHTML = '';
+  axDomViewport.innerHTML = '';
   if (frameImg.naturalWidth <= 0 || frameImg.naturalHeight <= 0) return;
+  const viewport = overlay.getOverlayContentRect();
+  axDomViewport.style.left = `${viewport.x}px`;
+  axDomViewport.style.top = `${viewport.y}px`;
+  axDomViewport.style.width = `${viewport.w}px`;
+  axDomViewport.style.height = `${viewport.h}px`;
   for (const node of snapshot.nodes) {
     if (node.frame.w <= 0 || node.frame.h <= 0) continue;
-    const rect = overlay.toOverlayRect(node.frame);
-    const el = document.createElement('button');
+    const el = document.createElement('div');
     const label = bestLabel(node);
     const spoken = label.text ? `${node.type} ${label.text}` : node.type;
-    el.type = 'button';
     el.className = `ax-dom-node ${node.role === 'AXGroup' ? 'group' : ''}`.trim();
-    el.style.left = `${rect.x}px`;
-    el.style.top = `${rect.y}px`;
-    el.style.width = `${Math.max(2, rect.w)}px`;
-    el.style.height = `${Math.max(2, rect.h)}px`;
+    el.style.left = `${(node.frame.x / snapshot.simSize.w) * 100}%`;
+    el.style.top = `${(node.frame.y / snapshot.simSize.h) * 100}%`;
+    el.style.width = `${Math.max((node.frame.w / snapshot.simSize.w) * 100, 0.2)}%`;
+    el.style.height = `${Math.max((node.frame.h / snapshot.simSize.h) * 100, 0.2)}%`;
     el.dataset.axNodeId = node.id;
     el.dataset.axRole = node.role;
     el.dataset.axType = node.type;
@@ -241,9 +245,8 @@ function renderAxDom() {
     el.setAttribute('aria-label', spoken);
     el.setAttribute('aria-description', `${node.role} at ${Math.round(node.frame.x)}, ${Math.round(node.frame.y)} sized ${Math.round(node.frame.w)} by ${Math.round(node.frame.h)}`);
     el.title = spoken;
-    el.tabIndex = -1;
     el.textContent = spoken;
-    axDomLayer.appendChild(el);
+    axDomViewport.appendChild(el);
   }
 }
 

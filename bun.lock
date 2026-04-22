@@ -8,16 +8,16 @@
         "typescript": "^5.6.3",
       },
     },
-    "swift-grab-bridge": {
-      "name": "swift-grab-bridge",
+    "sim-grab-bridge": {
+      "name": "sim-grab-bridge",
       "version": "0.1.0",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5.6.3",
       },
     },
-    "swift-grab-web": {
-      "name": "swift-grab-web",
+    "sim-grab-web": {
+      "name": "sim-grab-web",
       "version": "0.1.0",
       "devDependencies": {
         "typescript": "^5.6.3",
@@ -144,9 +144,9 @@
 
     "source-map-js": ["source-map-js@1.2.1", "", {}, "sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA=="],
 
-    "swift-grab-bridge": ["swift-grab-bridge@workspace:swift-grab-bridge"],
+    "sim-grab-bridge": ["sim-grab-bridge@workspace:sim-grab-bridge"],
 
-    "swift-grab-web": ["swift-grab-web@workspace:swift-grab-web"],
+    "sim-grab-web": ["sim-grab-web@workspace:sim-grab-web"],
 
     "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
