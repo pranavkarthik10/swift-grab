@@ -20,11 +20,14 @@ const selectionBox = $('selectionBox');
 const inspectBtn = $<HTMLButtonElement>('inspectBtn');
 const refreshBtn = $<HTMLButtonElement>('refreshBtn');
 const homeBtn = $<HTMLButtonElement>('homeBtn');
+const copyScreenshotBtn = $<HTMLButtonElement>('copyScreenshotBtn');
+const includeScreenshotEl = $<HTMLInputElement>('includeScreenshot');
 const transportSel = $<HTMLSelectElement>('transportSel');
 const axDomLayer = $('axDomLayer');
 const axDomViewport = $('axDomViewport');
 const closeSidebarBtn = $<HTMLButtonElement>('closeSidebar');
 const openSidebarBtn = $<HTMLButtonElement>('openSidebar');
+const floatingCopyScreenshotBtn = $<HTMLButtonElement>('floatingCopyScreenshotBtn');
 const selectedEl = $('selected');
 const stackEl = $<HTMLOListElement>('stack');
 const statusEl = $('status');
@@ -231,21 +234,43 @@ function renderAxDom() {
     const el = document.createElement('div');
     const label = bestLabel(node);
     const spoken = label.text ? `${node.type} ${label.text}` : node.type;
+    const path = pathForNode(node);
+    const context = buildSelectionContext(node, path);
     el.className = `ax-dom-node ${node.role === 'AXGroup' ? 'group' : ''}`.trim();
     el.style.left = `${(node.frame.x / snapshot.simSize.w) * 100}%`;
     el.style.top = `${(node.frame.y / snapshot.simSize.h) * 100}%`;
     el.style.width = `${Math.max((node.frame.w / snapshot.simSize.w) * 100, 0.2)}%`;
     el.style.height = `${Math.max((node.frame.h / snapshot.simSize.h) * 100, 0.2)}%`;
+    el.style.zIndex = String(Math.max(1, Math.round(1_000_000 - area(node.frame))));
+    el.setAttribute('role', domRoleForNode(node));
     el.dataset.axNodeId = node.id;
     el.dataset.axRole = node.role;
+    if (node.roleDescription) el.dataset.axRoleDescription = node.roleDescription;
     el.dataset.axType = node.type;
     if (node.label) el.dataset.axLabel = node.label;
     if (node.identifier) el.dataset.axIdentifier = node.identifier;
+    if (node.value) el.dataset.axValue = node.value;
+    if (node.help) el.dataset.axHelp = node.help;
+    if (node.subrole) el.dataset.axSubrole = node.subrole;
+    if (node.customActions.length) el.dataset.axCustomActions = node.customActions.join(', ');
+    el.dataset.axEnabled = String(node.enabled);
+    el.dataset.axContentRequired = String(node.contentRequired);
     el.dataset.axFrame = `${Math.round(node.frame.x)},${Math.round(node.frame.y)},${Math.round(node.frame.w)},${Math.round(node.frame.h)}`;
-    el.setAttribute('aria-label', spoken);
-    el.setAttribute('aria-description', `${node.role} at ${Math.round(node.frame.x)}, ${Math.round(node.frame.y)} sized ${Math.round(node.frame.w)} by ${Math.round(node.frame.h)}`);
-    el.title = spoken;
+    el.dataset.agentContext = context;
+    el.setAttribute('aria-label', `App UI element for code change: ${spoken}`);
+    el.setAttribute('aria-description', context);
+    el.title = context;
     el.textContent = spoken;
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectOrToggleNode(node, path);
+      if (selected) {
+        requestPointInspect({
+          x: node.frame.x + node.frame.w / 2,
+          y: node.frame.y + node.frame.h / 2,
+        });
+      }
+    });
     axDomViewport.appendChild(el);
   }
 }
@@ -419,6 +444,12 @@ document.addEventListener('visibilitychange', () => {
 inspectBtn.addEventListener('click', () => setInspectMode(!inspectMode));
 refreshBtn.addEventListener('click', () => bridge.send({ type: 'inspect:refresh' }));
 homeBtn.addEventListener('click', () => bridge.send({ type: 'hid:key', key: 'home' }));
+copyScreenshotBtn.addEventListener('click', () => {
+  void copyScreenshot();
+});
+floatingCopyScreenshotBtn.addEventListener('click', () => {
+  void copyScreenshot();
+});
 transportSel.addEventListener('change', () => {
   const v = transportSel.value as typeof transportPref;
   transportPref = v;
@@ -586,23 +617,102 @@ async function copySelectionContext(node: AXNode, path: AXNode[]) {
   const text = buildSelectionContext(node, path);
   if (!text || text === lastCopiedContext) return;
   try {
-    await navigator.clipboard.writeText(text);
+    if (includeScreenshotEl.checked) {
+      await writeClipboardWithOptionalScreenshot(text, true);
+    } else {
+      await copyText(text);
+    }
     lastCopiedContext = text;
-    console.log('[copied] selection context');
+    console.log(includeScreenshotEl.checked ? '[copied] selection context + screenshot' : '[copied] selection context');
   } catch (err) {
     console.warn('[clipboard] failed to copy selection context', err);
   }
 }
 
+async function copyScreenshot() {
+  try {
+    const blob = await currentScreenshotBlob();
+    await navigator.clipboard.write([
+      new ClipboardItem({ [blob.type]: blob }),
+    ]);
+    console.log('[copied] screenshot');
+  } catch (err) {
+    console.warn('[clipboard] failed to copy screenshot', err);
+  }
+}
+
+async function writeClipboardWithOptionalScreenshot(text: string, includeScreenshot: boolean) {
+  if (!includeScreenshot) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  try {
+    const blob = await currentScreenshotBlob();
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'text/plain': new Blob([text], { type: 'text/plain' }),
+        [blob.type]: blob,
+      }),
+    ]);
+  } catch (err) {
+    console.warn('[clipboard] failed to include screenshot; copying text only', err);
+    await copyText(text);
+  }
+}
+
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch (err) {
+    console.warn('[clipboard] navigator.writeText failed; trying selection fallback', err);
+  }
+
+  const textArea = document.createElement('textarea');
+  textArea.value = text;
+  textArea.setAttribute('readonly', '');
+  textArea.style.position = 'fixed';
+  textArea.style.left = '-9999px';
+  textArea.style.top = '0';
+  document.body.appendChild(textArea);
+  textArea.select();
+  const copied = document.execCommand('copy');
+  textArea.remove();
+  if (!copied) throw new Error('Clipboard fallback copy command failed.');
+}
+
+async function currentScreenshotBlob(): Promise<Blob> {
+  if (!frameImg.complete || frameImg.naturalWidth <= 0 || frameImg.naturalHeight <= 0) {
+    throw new Error('No simulator frame is ready to copy.');
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = frameImg.naturalWidth;
+  canvas.height = frameImg.naturalHeight;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Could not create screenshot canvas.');
+  ctx.drawImage(frameImg, 0, 0);
+
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+  if (!blob) throw new Error('Could not encode screenshot.');
+  return blob;
+}
+
 function buildSelectionContext(node: AXNode, path: AXNode[]): string {
   const lines = [
-    'Current simulator UI selection:',
+    'Use this simulator UI selection as context for changing the app code.',
+    'Do not solve this by controlling the simulator. Find and edit the app implementation that renders this UI.',
     `- device: ${snapshot.deviceId}`,
     `- tree source: ${snapshot.source}`,
+    `- simulator size: ${Math.round(snapshot.simSize.w)}x${Math.round(snapshot.simSize.h)}`,
     `- selected: ${formatNodeForAgent(node)}`,
   ];
+  lines.push(`- enabled: ${node.enabled}`);
+  lines.push(`- content required: ${node.contentRequired}`);
   if (node.value) lines.push(`- value: ${node.value}`);
   if (node.identifier) lines.push(`- identifier: ${node.identifier}`);
+  if (node.roleDescription) lines.push(`- role description: ${node.roleDescription}`);
   if (node.subrole) lines.push(`- subrole: ${node.subrole}`);
   if (node.help) lines.push(`- help: ${node.help}`);
   if (node.customActions.length) lines.push(`- custom actions: ${node.customActions.join(', ')}`);
@@ -619,7 +729,17 @@ function formatNodeForAgent(node: AXNode): string {
   const label = bestLabel(node);
   const labelBit = label.text ? ` "${label.text}"` : '';
   const idBit = node.identifier ? ` #${node.identifier}` : '';
-  return `<${node.type} />${labelBit}${idBit} ${node.role} @ ${Math.round(node.frame.x)},${Math.round(node.frame.y)} ${Math.round(node.frame.w)}x${Math.round(node.frame.h)}`;
+  const roleDescription = node.roleDescription ? ` (${node.roleDescription})` : '';
+  return `<${node.type} />${labelBit}${idBit} ${node.role}${roleDescription} @ ${Math.round(node.frame.x)},${Math.round(node.frame.y)} ${Math.round(node.frame.w)}x${Math.round(node.frame.h)}`;
+}
+
+function domRoleForNode(node: AXNode): string {
+  if (node.role === 'AXButton') return 'button';
+  if (node.role === 'AXLink') return 'link';
+  if (node.role === 'AXTextField' || node.role === 'AXTextArea') return 'textbox';
+  if (node.role === 'AXImage') return 'img';
+  if (node.role === 'AXStaticText') return 'text';
+  return 'generic';
 }
 
 function escapeHtml(s: string): string {

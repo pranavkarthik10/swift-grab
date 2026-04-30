@@ -153,6 +153,10 @@ that launched `sim-grab`.
 Open System Settings → Privacy & Security → Screen Recording, enable permission
 for your terminal app, then restart the terminal and `sim-grab`.
 
+On first run, `sim-grab` builds a small local ScreenCaptureKit helper from the
+Swift source included in the package. If that build fails, the bridge falls back
+to slower `simctl` screenshots.
+
 You can also force the slower screenshot fallback:
 
 ```bash
