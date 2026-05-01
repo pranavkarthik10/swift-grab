@@ -1,4 +1,5 @@
-import type { ServerWebSocket } from 'bun';
+import { createServer } from 'node:http';
+import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 import {
   type BridgeMsg,
   type ClientMsg,
@@ -22,6 +23,9 @@ const FRAME_FORMAT = (process.env.FRAME_FORMAT === 'png' ? 'png' : 'jpeg') as 'j
 const CAPTURE_FPS = Number(process.env.CAPTURE_FPS ?? 50);
 const CAPTURE_QUALITY = Number(process.env.CAPTURE_QUALITY ?? 0.7);
 const CAPTURE_MAX_WIDTH = Number(process.env.CAPTURE_MAX_WIDTH ?? 1200);
+const CAPTURE_RESTART_LIMIT = Number(process.env.CAPTURE_RESTART_LIMIT ?? 6);
+const CAPTURE_RESTART_WINDOW_MS = Number(process.env.CAPTURE_RESTART_WINDOW_MS ?? 30_000);
+const CAPTURE_RESTART_DELAY_MS = Number(process.env.CAPTURE_RESTART_DELAY_MS ?? 650);
 // CAPTURE=0 → skip ScreenCaptureKit and go straight to simctl screenshots.
 // Useful when the user hasn't granted Screen Recording permission yet.
 const CAPTURE_DISABLE = process.env.CAPTURE === '0';
@@ -44,7 +48,7 @@ function logCaps(c: typeof caps, cap: boolean, binPresent: boolean) {
   if (!binPresent) console.warn('[bridge] capture binary not built — run `cd bridge/capture && swift build -c release`');
 }
 
-type WS = ServerWebSocket<unknown>;
+type WS = WebSocket;
 const sockets = new Set<WS>();
 
 function send(ws: WS, msg: BridgeMsg) {
@@ -108,6 +112,9 @@ let screenshotLoop: { stop: () => void; pulse: () => void } | null = null;
 let pulseFrames: () => void = () => {};
 let activeTransport: VideoTransport = 'none';
 let lastMeta: BridgeMsg | null = null;
+let captureRestartTimer: ReturnType<typeof setTimeout> | null = null;
+let captureRestartTimes: number[] = [];
+let captureSessionId = 0;
 
 function videoTransport(): VideoTransport {
   return activeTransport;
@@ -133,6 +140,11 @@ function ensureVideoRunning() {
 
 function startCaptureKit() {
   if (!canUseCaptureKit()) return false;
+  const sessionId = ++captureSessionId;
+  if (captureRestartTimer) {
+    clearTimeout(captureRestartTimer);
+    captureRestartTimer = null;
+  }
   console.log(`[bridge] starting ScreenCaptureKit @ ${CAPTURE_FPS}fps q=${CAPTURE_QUALITY} maxW=${CAPTURE_MAX_WIDTH}`);
   const handle = startCapture(
     { fps: CAPTURE_FPS, quality: CAPTURE_QUALITY, maxWidth: CAPTURE_MAX_WIDTH },
@@ -150,11 +162,16 @@ function startCaptureKit() {
       broadcastJson(msg);
     },
     (err) => {
+      if (sessionId !== captureSessionId) return;
       console.warn('[bridge] capture error:', err);
       capture?.stop();
       capture = null;
       activeTransport = 'none';
       lastMeta = null;
+      if (shouldRestartCapture(err)) {
+        scheduleCaptureRestart(err);
+        return;
+      }
       startScreenshots();
     },
   );
@@ -166,12 +183,40 @@ function startCaptureKit() {
 }
 
 function stopCapture() {
+  captureSessionId++;
+  if (captureRestartTimer) {
+    clearTimeout(captureRestartTimer);
+    captureRestartTimer = null;
+  }
   capture?.stop();
   capture = null;
   if (activeTransport === 'capturekit') {
     activeTransport = 'none';
     lastMeta = null;
   }
+}
+
+function shouldRestartCapture(err: string): boolean {
+  if (/permission denied|simulator window not found/i.test(err)) return false;
+
+  const now = Date.now();
+  captureRestartTimes = captureRestartTimes.filter((t) => now - t < CAPTURE_RESTART_WINDOW_MS);
+  if (captureRestartTimes.length >= CAPTURE_RESTART_LIMIT) {
+    console.warn('[bridge] capture restart limit reached; falling back to screenshots');
+    return false;
+  }
+  captureRestartTimes.push(now);
+  return true;
+}
+
+function scheduleCaptureRestart(reason: string) {
+  if (captureRestartTimer) return;
+  console.log(`[bridge] restarting ScreenCaptureKit after stream stop: ${reason}`);
+  captureRestartTimer = setTimeout(() => {
+    captureRestartTimer = null;
+    if (!caps.booted || activeTransport !== 'none') return;
+    if (!startCaptureKit()) startScreenshots();
+  }, CAPTURE_RESTART_DELAY_MS);
 }
 
 function startScreenshots() {
@@ -206,114 +251,132 @@ function stopScreenshots() {
 
 // ---------- HTTP + WebSocket server ----------
 
-const server = Bun.serve({
-  port: PORT,
-  async fetch(req, server) {
-    const url = new URL(req.url);
-    if (url.pathname === '/ws') {
-      const ok = server.upgrade(req, {});
-      if (ok) return undefined;
-      return new Response('upgrade failed', { status: 400 });
-    }
-    if (url.pathname === '/health') {
-      return Response.json({
+const server = createServer((req, res) => {
+  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+  if (url.pathname === '/health') {
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({
         ok: true,
         caps,
         videoTransport: videoTransport(),
-      });
-    }
-    return new Response(
+    }));
+    return;
+  }
+  res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
+  res.end(
       `sim-grab bridge\n\nWebSocket: ws://localhost:${PORT}/ws\nHealth:    http://localhost:${PORT}/health\n`,
-      { headers: { 'content-type': 'text/plain; charset=utf-8' } },
-    );
-  },
-  websocket: {
-    async open(ws) {
-      sockets.add(ws);
-      // Re-detect on every new client so the user never has to restart
-      // the bridge after installing idb, booting a sim, etc.
-      caps = await detectCapabilities(selectedUdid);
-      selectedUdid = caps.udid;
-      ensureVideoRunning();
-      send(ws, hello());
-      if (lastMeta) send(ws, lastMeta);
-      if (caps.idb && caps.booted) {
-        const snap = await captureSnapshot(caps.deviceId, caps.udid);
-        if (snap) send(ws, { type: 'snapshot', data: snap });
-      }
-    },
-    close(ws) { sockets.delete(ws); },
-    async message(ws, raw) {
-      if (typeof raw !== 'string') return;
-      let msg: ClientMsg;
-      try { msg = JSON.parse(raw) as ClientMsg; } catch { return; }
-      try {
-        switch (msg.type) {
-          case 'video:transport':
-            switchTransport(msg.transport);
-            break;
-          case 'device:select':
-            selectedUdid = msg.udid;
-            caps = await detectCapabilities(selectedUdid);
-            selectedUdid = caps.udid;
-            switchTransport(activeTransport === 'capturekit' ? 'capturekit' : 'screenshot');
-            ensureVideoRunning();
-            broadcastJson(hello());
-            void refreshAll();
-            break;
-          case 'inspect:refresh': {
-            if (!caps.booted) throw new Error('no booted simulator');
-            const snap = await captureSnapshot(caps.deviceId, caps.udid);
-            if (snap) send(ws, { type: 'snapshot', data: snap });
-            break;
-          }
-          case 'inspect:point': {
-            if (!caps.booted) throw new Error('no booted simulator');
-            if (!caps.idb) throw new Error('idb not installed');
-            const node = await describePoint(msg.x, msg.y, caps.udid);
-            send(ws, { type: 'inspect:point', requestId: msg.requestId, x: msg.x, y: msg.y, node });
-            break;
-          }
-          case 'hid:tap':
-            if (!caps.booted) throw new Error('no booted simulator');
-            if (!caps.idb) throw new Error('idb not installed');
-            await idbTap(msg.x, msg.y, caps.udid);
-            pulseFrames();
-            void refreshAll();
-            break;
-          case 'hid:swipe':
-            if (!caps.booted) throw new Error('no booted simulator');
-            if (!caps.idb) throw new Error('idb not installed');
-            await idbSwipe(msg.x1, msg.y1, msg.x2, msg.y2, msg.durationMs, caps.udid);
-            pulseFrames();
-            void refreshAll();
-            break;
-          case 'hid:text':
-            if (!caps.booted) throw new Error('no booted simulator');
-            if (!caps.idb) throw new Error('idb not installed');
-            await idbText(msg.text, caps.udid);
-            pulseFrames();
-            void refreshAll();
-            break;
-          case 'hid:key':
-            if (!caps.booted) throw new Error('no booted simulator');
-            if (!caps.idb) throw new Error('idb not installed');
-            await idbKey(msg.key, caps.udid);
-            pulseFrames();
-            void refreshAll();
-            break;
-        }
-      } catch (e) {
-        send(ws, { type: 'error', message: e instanceof Error ? e.message : String(e) });
-      }
-    },
-  },
+  );
 });
 
-process.on('SIGINT',  () => { stopCapture(); stopScreenshots(); process.exit(0); });
-process.on('SIGTERM', () => { stopCapture(); stopScreenshots(); process.exit(0); });
+const wss = new WebSocketServer({ noServer: true });
 
-console.log(`[bridge] listening on http://localhost:${server.port} (ws /ws)`);
+server.on('upgrade', (req, socket, head) => {
+  const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+  if (url.pathname !== '/ws') {
+    socket.destroy();
+    return;
+  }
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    wss.emit('connection', ws, req);
+  });
+});
+
+wss.on('connection', (ws) => {
+  sockets.add(ws);
+  ws.on('close', () => { sockets.delete(ws); });
+  ws.on('message', (raw) => {
+    void handleMessage(ws, raw);
+  });
+  void sendHello(ws);
+});
+
+async function sendHello(ws: WS) {
+  // Re-detect on every new client so the user never has to restart
+  // the bridge after installing idb, booting a sim, etc.
+  caps = await detectCapabilities(selectedUdid);
+  selectedUdid = caps.udid;
+  ensureVideoRunning();
+  send(ws, hello());
+  if (lastMeta) send(ws, lastMeta);
+  if (caps.idb && caps.booted) {
+    const snap = await captureSnapshot(caps.deviceId, caps.udid);
+    if (snap) send(ws, { type: 'snapshot', data: snap });
+  }
+}
+
+async function handleMessage(ws: WS, raw: RawData) {
+  const text = typeof raw === 'string' ? raw : raw.toString();
+  let msg: ClientMsg;
+  try { msg = JSON.parse(text) as ClientMsg; } catch { return; }
+  try {
+    switch (msg.type) {
+      case 'video:transport':
+        switchTransport(msg.transport);
+        break;
+      case 'device:select':
+        selectedUdid = msg.udid;
+        caps = await detectCapabilities(selectedUdid);
+        selectedUdid = caps.udid;
+        switchTransport(activeTransport === 'capturekit' ? 'capturekit' : 'screenshot');
+        ensureVideoRunning();
+        broadcastJson(hello());
+        void refreshAll();
+        break;
+      case 'inspect:refresh': {
+        if (!caps.booted) throw new Error('no booted simulator');
+        const snap = await captureSnapshot(caps.deviceId, caps.udid);
+        if (snap) send(ws, { type: 'snapshot', data: snap });
+        break;
+      }
+      case 'inspect:point': {
+        if (!caps.booted) throw new Error('no booted simulator');
+        if (!caps.idb) throw new Error('idb not installed');
+        const node = await describePoint(msg.x, msg.y, caps.udid);
+        send(ws, { type: 'inspect:point', requestId: msg.requestId, x: msg.x, y: msg.y, node });
+        break;
+      }
+      case 'hid:tap':
+        if (!caps.booted) throw new Error('no booted simulator');
+        if (!caps.idb) throw new Error('idb not installed');
+        await idbTap(msg.x, msg.y, caps.udid);
+        pulseFrames();
+        void refreshAll();
+        break;
+      case 'hid:swipe':
+        if (!caps.booted) throw new Error('no booted simulator');
+        if (!caps.idb) throw new Error('idb not installed');
+        await idbSwipe(msg.x1, msg.y1, msg.x2, msg.y2, msg.durationMs, caps.udid);
+        pulseFrames();
+        void refreshAll();
+        break;
+      case 'hid:text':
+        if (!caps.booted) throw new Error('no booted simulator');
+        if (!caps.idb) throw new Error('idb not installed');
+        await idbText(msg.text, caps.udid);
+        pulseFrames();
+        void refreshAll();
+        break;
+      case 'hid:key':
+        if (!caps.booted) throw new Error('no booted simulator');
+        if (!caps.idb) throw new Error('idb not installed');
+        await idbKey(msg.key, caps.udid);
+        pulseFrames();
+        void refreshAll();
+        break;
+    }
+  } catch (e) {
+    send(ws, { type: 'error', message: e instanceof Error ? e.message : String(e) });
+  }
+}
+
+process.on('SIGINT',  () => { stopCapture(); stopScreenshots(); wss.close(); server.close(); process.exit(0); });
+process.on('SIGTERM', () => { stopCapture(); stopScreenshots(); wss.close(); server.close(); process.exit(0); });
+
+await new Promise<void>((resolveListen) => {
+  server.listen(PORT, '127.0.0.1', resolveListen);
+});
+
+console.log(`[bridge] listening on http://localhost:${PORT} (ws /ws)`);
 
 // Start capture AFTER the server is listening so clients can connect
 // and we can fall back cleanly if capture never produces frames.

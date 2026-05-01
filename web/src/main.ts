@@ -4,6 +4,14 @@ import { InspectorOverlay } from './overlay';
 import { mockFrameDataUrl, mockSnapshot } from './mock';
 import { BridgeClient } from './ws';
 
+declare global {
+  interface Window {
+    __SIM_GRAB_CONFIG__?: {
+      bridgePort?: string;
+    };
+  }
+}
+
 // ---------- DOM refs ----------
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
   const el = document.getElementById(id);
@@ -60,14 +68,14 @@ deviceEl.textContent = snapshot.deviceId;
 
 // ---------- bridge ----------
 const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string> }).env;
-const bridgePort = viteEnv?.VITE_SIM_GRAB_BRIDGE_PORT || '7878';
+const bridgePort = window.__SIM_GRAB_CONFIG__?.bridgePort || viteEnv?.VITE_SIM_GRAB_BRIDGE_PORT || '7878';
 const wsUrl = `ws://${location.hostname || 'localhost'}:${bridgePort}/ws`;
 let liveFrameUrl: string | null = null;
 let hasRealFrames = false;
 let hasRealTree = false;
 let transportPref: 'auto' | 'capturekit' | 'screenshot' = 'auto';
 let lastFrameSource: 'capturekit' | 'screenshot' | 'none' = 'none';
-let lastHelloTransport: 'capturekit' | 'screenshot' | 'none' = 'none';
+let currentTransport: 'capturekit' | 'screenshot' | 'none' = 'none';
 let pointInspectSeq = 0;
 let selectedPointInspectSeq = 0;
 let lastCopiedContext = '';
@@ -81,9 +89,10 @@ const bridge = new BridgeClient(wsUrl, {
     clearMockState();
     if (!booted) setStatus('err', 'no booted simulator');
     else if (!idb && simctl) setStatus('live', 'frames only — install idb for inspector');
-    else setStatus('live', videoTransport === 'capturekit' ? 'ScreenCaptureKit 50fps' : videoTransport === 'screenshot' ? 'simctl fallback' : '');
+    else setStatus('live', transportStatusNote(videoTransport));
+    currentTransport = videoTransport;
     if (transportPref === 'auto') transportSel.value = 'auto';
-    lastHelloTransport = videoTransport;
+    updateAutoTransport();
   },
   onSnapshot: (s) => {
     hasRealTree = true;
@@ -110,13 +119,11 @@ const bridge = new BridgeClient(wsUrl, {
     if (!hasRealTree && meta.width > 0 && meta.height > 0) {
       overlay.setSimSize(meta.width, meta.height);
     }
-    const note =
-      meta.source === 'capturekit' ? `ScreenCaptureKit ${meta.fps}fps` :
-      meta.source === 'screenshot' ? 'simctl fallback' :
-      '';
+    const note = transportStatusNote(meta.source, meta.fps);
     if (note) setStatus('live', note);
 
     lastFrameSource = meta.source;
+    currentTransport = meta.source;
     overlay.setFrameMeta(meta.width, meta.height, meta.source);
   },
   onStatus: (s) => {
@@ -220,10 +227,9 @@ function selectOrToggleNode(node: AXNode, path = pathForNode(node)) {
 function updateAutoTransport() {
   if (transportPref !== 'auto') return;
   const want = inspectMode ? 'screenshot' : 'capturekit';
-  if (lastHelloTransport !== want) {
-    bridge.send({ type: 'video:transport', transport: want });
-    lastHelloTransport = want;
-  }
+  if (currentTransport === want) return;
+  currentTransport = want;
+  bridge.send({ type: 'video:transport', transport: want });
 }
 
 function renderAxDom() {
@@ -494,7 +500,11 @@ deviceSel.addEventListener('change', () => {
 transportSel.addEventListener('change', () => {
   const v = transportSel.value as typeof transportPref;
   transportPref = v;
-  if (v === 'auto') return;
+  if (v === 'auto') {
+    updateAutoTransport();
+    return;
+  }
+  currentTransport = v;
   bridge.send({ type: 'video:transport', transport: v });
 });
 
@@ -584,6 +594,14 @@ function setStatus(kind: 'connecting' | 'live' | 'mock' | 'err', note?: string) 
     kind === 'err'  ? 'error' :
                       'connecting…';
   statusEl.textContent = note ? `${base} · ${note}` : base;
+}
+
+function transportStatusNote(transport: 'capturekit' | 'screenshot' | 'none', fps = 50) {
+  if (transport === 'capturekit') return `ScreenCaptureKit ${fps}fps`;
+  if (transport === 'screenshot') {
+    return transportPref === 'auto' && inspectMode ? 'inspect alignment (simctl)' : 'simctl fallback';
+  }
+  return '';
 }
 function setSource(src: Snapshot['source']) { sourceEl.textContent = `tree: ${src}`; }
 

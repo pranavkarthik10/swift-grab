@@ -1,11 +1,16 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
-import { dirname, resolve } from 'node:path';
+import { spawn } from 'node:child_process';
+import { createServer } from 'node:http';
+import { existsSync } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
+import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const bridgeDir = resolve(root, 'bridge');
-const webDir = resolve(root, 'web');
+const webDistDir = resolve(root, 'web', 'dist');
+const bridgeEntry = resolve(bridgeDir, 'dist', 'index.js');
 const captureDir = resolve(bridgeDir, 'capture');
 const captureBin = resolve(captureDir, '.build', 'release', 'sim-grab-capture');
 const bridgePort = process.env.PORT || '7878';
@@ -23,7 +28,7 @@ Environment:
   CAPTURE=0             Disable ScreenCaptureKit and use simctl screenshots
 
 Requirements:
-  Bun, Xcode command line tools, a booted iOS Simulator, and idb for AX/input.
+  Node.js, Xcode command line tools, a booted iOS Simulator, and idb for AX/input.
 `);
 }
 
@@ -32,30 +37,41 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
   process.exit(0);
 }
 
+if (!existsSync(bridgeEntry) || !existsSync(resolve(webDistDir, 'index.html'))) {
+  console.error('[sim-grab] build artifacts are missing; run `bun run build` before starting from a checkout');
+  process.exit(1);
+}
+
 console.log('[sim-grab] starting bridge and browser UI');
 console.log(`[sim-grab] UI:     http://localhost:${webPort}`);
 console.log(`[sim-grab] bridge: http://localhost:${bridgePort}/health`);
 
 const children = [];
+let webServer = null;
+let shuttingDown = false;
 
 await ensureCaptureHelper();
 
 function run(label, command, args, options) {
-  const child = Bun.spawn([command, ...args], {
+  const child = spawn(command, args, {
     cwd: options.cwd,
     env: {
       ...process.env,
       PORT: bridgePort,
       SIM_GRAB_WEB_PORT: webPort,
-      VITE_SIM_GRAB_BRIDGE_PORT: bridgePort,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-  void pipeOutput(label, child.stdout);
-  void pipeOutput(label, child.stderr);
+  pipeOutput(label, child.stdout);
+  pipeOutput(label, child.stderr);
 
-  child.exited.then((code) => {
+  child.on('error', (err) => {
+    if (shuttingDown) return;
+    console.error(`[sim-grab] ${label} failed: ${err.message}`);
+    shutdown(1);
+  });
+  child.on('exit', (code) => {
     if (shuttingDown) return;
     console.error(`[sim-grab] ${label} stopped (exit ${code})`);
     shutdown(code || 1);
@@ -65,34 +81,79 @@ function run(label, command, args, options) {
   return child;
 }
 
-function prefix(label, chunk) {
-  const text = chunk.toString();
-  for (const line of text.split(/\r?\n/)) {
-    if (line.length) console.log(`[${label}] ${line}`);
-  }
-}
-
-async function pipeOutput(label, stream) {
-  const reader = stream.getReader();
-  const decoder = new TextDecoder();
+function pipeOutput(label, stream) {
+  stream.setEncoding('utf8');
   let pending = '';
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    pending += decoder.decode(value, { stream: true });
+  stream.on('data', (chunk) => {
+    pending += chunk;
     const lines = pending.split(/\r?\n/);
     pending = lines.pop() || '';
     for (const line of lines) {
       if (line.length) console.log(`[${label}] ${line}`);
     }
-  }
-
-  pending += decoder.decode();
-  if (pending.length) console.log(`[${label}] ${pending}`);
+  });
+  stream.on('end', () => {
+    if (pending.length) console.log(`[${label}] ${pending}`);
+  });
 }
 
-let shuttingDown = false;
+async function startStaticServer() {
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    const rawPath = decodeURIComponent(url.pathname === '/' ? '/index.html' : url.pathname);
+    const relativePath = rawPath.replace(/^\/+/, '');
+    const filePath = resolve(webDistDir, relativePath);
+
+    if (!filePath.startsWith(webDistDir + '/') && filePath !== webDistDir) {
+      res.writeHead(403).end('forbidden');
+      return;
+    }
+
+    try {
+      const info = await stat(filePath);
+      const finalPath = info.isDirectory() ? join(filePath, 'index.html') : filePath;
+      let body = await readFile(finalPath);
+      const type = contentType(finalPath);
+      if (finalPath.endsWith('index.html')) {
+        const config = `<script>window.__SIM_GRAB_CONFIG__=${JSON.stringify({ bridgePort })}</script>`;
+        body = Buffer.from(body.toString('utf8').replace('</head>', `${config}</head>`));
+      }
+      res.writeHead(200, {
+        'content-type': type,
+        'cache-control': finalPath.endsWith('index.html') ? 'no-cache' : 'public, max-age=31536000, immutable',
+      });
+      res.end(body);
+    } catch {
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }).end('not found');
+    }
+  });
+
+  await new Promise((resolveListen, rejectListen) => {
+    server.once('error', rejectListen);
+    server.listen(Number(webPort), '127.0.0.1', () => {
+      server.off('error', rejectListen);
+      resolveListen();
+    });
+  });
+  webServer = server;
+}
+
+function contentType(path) {
+  switch (extname(path)) {
+    case '.html': return 'text/html; charset=utf-8';
+    case '.js': return 'text/javascript; charset=utf-8';
+    case '.css': return 'text/css; charset=utf-8';
+    case '.json': return 'application/json; charset=utf-8';
+    case '.svg': return 'image/svg+xml';
+    case '.png': return 'image/png';
+    case '.jpg':
+    case '.jpeg': return 'image/jpeg';
+    case '.webp': return 'image/webp';
+    case '.ico': return 'image/x-icon';
+    default: return 'application/octet-stream';
+  }
+}
+
 function shutdown(code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -103,31 +164,25 @@ function shutdown(code = 0) {
       // Already exited.
     }
   }
+  webServer?.close(() => {});
   setTimeout(() => process.exit(code), 150);
 }
 
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
 
-run('bridge', 'bun', ['run', 'src/index.ts'], { cwd: bridgeDir });
-run('web', 'bun', ['x', 'vite', '--host', '127.0.0.1', '--port', webPort, '--strictPort'], { cwd: webDir });
+await startStaticServer();
+run('bridge', process.execPath, [bridgeEntry], { cwd: bridgeDir });
 
 async function ensureCaptureHelper() {
   if (process.env.CAPTURE === '0') return;
   if (process.platform !== 'darwin') return;
-  if (await fileExists(captureBin)) return;
-  if (!(await fileExists(resolve(captureDir, 'Package.swift')))) return;
+  if (existsSync(captureBin)) return;
+  if (!existsSync(resolve(captureDir, 'Package.swift'))) return;
 
   console.log('[sim-grab] building ScreenCaptureKit helper');
   try {
-    const proc = Bun.spawn(['swift', 'build', '-c', 'release'], {
-      cwd: captureDir,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    void pipeOutput('capture-build', proc.stdout);
-    void pipeOutput('capture-build', proc.stderr);
-    const code = await proc.exited;
+    const code = await runForeground('swift', ['build', '-c', 'release'], captureDir, 'capture-build');
     if (code === 0) return;
   } catch (err) {
     console.warn(`[sim-grab] could not run swift build: ${err instanceof Error ? err.message : String(err)}`);
@@ -135,6 +190,12 @@ async function ensureCaptureHelper() {
   console.warn('[sim-grab] ScreenCaptureKit helper build failed; falling back to simctl screenshots');
 }
 
-async function fileExists(path) {
-  return Bun.file(path).exists();
+function runForeground(command, args, cwd, label) {
+  return new Promise((resolveRun, rejectRun) => {
+    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    pipeOutput(label, child.stdout);
+    pipeOutput(label, child.stderr);
+    child.on('error', rejectRun);
+    child.on('exit', (code) => resolveRun(code ?? 1));
+  });
 }

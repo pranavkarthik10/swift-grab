@@ -17,7 +17,9 @@
 // uses under the hood.
 
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { spawn } from 'node:child_process';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export type CaptureMeta = {
   width: number;
@@ -41,7 +43,7 @@ export type CaptureOptions = {
 // and when the bridge is bundled somewhere else as long as the capture
 // binary is shipped alongside it.
 export function captureBinaryPath(): string {
-  return resolve(import.meta.dir, '..', 'capture', '.build', 'release', 'sim-grab-capture');
+  return resolve(dirname(fileURLToPath(import.meta.url)), '..', 'capture', '.build', 'release', 'sim-grab-capture');
 }
 
 export function captureAvailable(): boolean {
@@ -63,10 +65,8 @@ export function startCapture(
   };
 
   let stopped = false;
-  const proc = Bun.spawn([bin], {
-    stdin: 'pipe',
-    stdout: 'pipe',
-    stderr: 'pipe',
+  const proc = spawn(bin, [], {
+    stdio: ['pipe', 'pipe', 'pipe'],
     env,
   });
 
@@ -74,13 +74,11 @@ export function startCapture(
   // like `capture:ready`, `capture:fps 42.1`, and `capture:permission-denied`
   // — surface the interesting ones, swallow the rest.
   (async () => {
-    const reader = proc.stderr.getReader();
     const dec = new TextDecoder();
     let buf = '';
-    while (!stopped) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
+    for await (const chunk of proc.stderr) {
+      if (stopped) break;
+      buf += dec.decode(chunk, { stream: true });
       let nl = buf.indexOf('\n');
       while (nl !== -1) {
         const line = buf.slice(0, nl);
@@ -100,13 +98,12 @@ export function startCapture(
   // Parse framed stdout. This is a state machine because frames can be
   // arbitrarily split across chunk boundaries from the pipe.
   (async () => {
-    const reader = proc.stdout.getReader();
     let acc: Uint8Array = new Uint8Array(0);
 
-    while (!stopped) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (!value) continue;
+    for await (const chunk of proc.stdout) {
+      if (stopped) break;
+      const value = new Uint8Array(chunk);
+      if (!value.length) continue;
 
       // Append chunk.
       const merged = new Uint8Array(acc.length + value.length);
@@ -157,11 +154,9 @@ export function startCapture(
     onError(`capture stdout read failed: ${e instanceof Error ? e.message : String(e)}`);
   });
 
-  proc.exited.then((code) => {
+  proc.on('exit', (code) => {
     if (stopped) return;
-    if (code !== 0) {
-      onError(`capture exited with code ${code}`);
-    }
+    onError(`capture exited with code ${code}`);
   });
 
   return {

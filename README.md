@@ -191,8 +191,9 @@ The bridge streams:
 
 In `Auto` video mode:
 
-- Inspect mode prefers screenshot-backed alignment for accurate mapping.
-- Interaction mode prefers ScreenCaptureKit when available for smoother live video.
+- Inspect mode uses `simctl` screenshots for tighter AX/frame alignment.
+- Interaction mode uses ScreenCaptureKit when available for smoother live video.
+- If ScreenCaptureKit cannot start, the bridge falls back to `simctl` screenshots.
 
 You can also force `CaptureKit` or `simctl` from the UI.
 
@@ -226,4 +227,3 @@ Environment variables:
 - The underlying AX tree can still collapse some grouped controls, especially complex nav and tab bars.
 - The latent DOM mirror can only expose what the simulator accessibility APIs provide.
 - If `idb` is unavailable or unstable, point inspection and input control will degrade or stop working.
-
