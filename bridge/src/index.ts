@@ -151,6 +151,7 @@ function startCaptureKit() {
     (jpeg) => broadcastBinary(BIN_TAG_IMAGE, jpeg),
     (meta) => {
       activeTransport = 'capturekit';
+      captureRestartTimes = [];
       const msg: BridgeMsg = {
         type: 'frame:meta',
         width: meta.width,
@@ -197,7 +198,7 @@ function stopCapture() {
 }
 
 function shouldRestartCapture(err: string): boolean {
-  if (/permission denied|simulator window not found/i.test(err)) return false;
+  if (/permission denied/i.test(err)) return false;
 
   const now = Date.now();
   captureRestartTimes = captureRestartTimes.filter((t) => now - t < CAPTURE_RESTART_WINDOW_MS);
