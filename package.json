@@ -1,6 +1,6 @@
 {
   "name": "sim-grab",
-  "version": "0.1.9",
+  "version": "0.1.11",
   "description": "Inspect and drive a live iOS Simulator from a browser with accessibility metadata for AI coding workflows.",
   "license": "MIT",
   "private": false,

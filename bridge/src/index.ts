@@ -112,6 +112,7 @@ let screenshotLoop: { stop: () => void; pulse: () => void } | null = null;
 let pulseFrames: () => void = () => {};
 let activeTransport: VideoTransport = 'none';
 let lastMeta: BridgeMsg | null = null;
+let lastCaptureMeta: BridgeMsg | null = null;
 let captureRestartTimer: ReturnType<typeof setTimeout> | null = null;
 let captureRestartTimes: number[] = [];
 let captureSessionId = 0;
@@ -121,25 +122,35 @@ function videoTransport(): VideoTransport {
 }
 
 function switchTransport(to: VideoTransport) {
-  stopCapture();
-  stopScreenshots();
   if (to === 'capturekit') {
-    const started = startCaptureKit();
+    stopScreenshots();
+    if (capture) {
+      activateCaptureKit();
+      return;
+    }
+    const started = startCaptureKit(true);
     if (!started) startScreenshots();
     return;
   }
   if (to === 'screenshot') {
+    // Keep CaptureKit warm in the background so leaving Inspect mode can
+    // return to it immediately instead of reacquiring the Simulator window.
+    if (!capture) startCaptureKit(false);
     startScreenshots();
   }
 }
 
 function ensureVideoRunning() {
   if (activeTransport !== 'none' || !caps.booted) return;
-  if (!startCaptureKit()) startScreenshots();
+  if (!startCaptureKit(true)) startScreenshots();
 }
 
-function startCaptureKit() {
+function startCaptureKit(activate = true) {
   if (!canUseCaptureKit()) return false;
+  if (capture) {
+    if (activate) activateCaptureKit();
+    return true;
+  }
   const sessionId = ++captureSessionId;
   if (captureRestartTimer) {
     clearTimeout(captureRestartTimer);
@@ -148,9 +159,10 @@ function startCaptureKit() {
   console.log(`[bridge] starting ScreenCaptureKit @ ${CAPTURE_FPS}fps q=${CAPTURE_QUALITY} maxW=${CAPTURE_MAX_WIDTH}`);
   const handle = startCapture(
     { fps: CAPTURE_FPS, quality: CAPTURE_QUALITY, maxWidth: CAPTURE_MAX_WIDTH },
-    (jpeg) => broadcastBinary(BIN_TAG_IMAGE, jpeg),
+    (jpeg) => {
+      if (activeTransport === 'capturekit') broadcastBinary(BIN_TAG_IMAGE, jpeg);
+    },
     (meta) => {
-      activeTransport = 'capturekit';
       captureRestartTimes = [];
       const msg: BridgeMsg = {
         type: 'frame:meta',
@@ -159,28 +171,43 @@ function startCaptureKit() {
         fps: meta.fps || CAPTURE_FPS,
         source: 'capturekit',
       };
-      lastMeta = msg;
-      broadcastJson(msg);
+      lastCaptureMeta = msg;
+      if (activeTransport === 'capturekit') {
+        lastMeta = msg;
+        broadcastJson(msg);
+      }
     },
     (err) => {
       if (sessionId !== captureSessionId) return;
       console.warn('[bridge] capture error:', err);
       capture?.stop();
       capture = null;
-      activeTransport = 'none';
-      lastMeta = null;
+      lastCaptureMeta = null;
+      if (activeTransport === 'capturekit') {
+        activeTransport = 'none';
+        lastMeta = null;
+      }
+      if (activeTransport === 'screenshot') return;
       if (shouldRestartCapture(err)) {
         scheduleCaptureRestart(err);
         return;
       }
-      startScreenshots();
+      if (!screenshotLoop) startScreenshots();
     },
   );
   capture = handle;
+  if (activate) activateCaptureKit();
+  return true;
+}
+
+function activateCaptureKit() {
   activeTransport = 'capturekit';
+  if (lastCaptureMeta) {
+    lastMeta = lastCaptureMeta;
+    broadcastJson(lastCaptureMeta);
+  }
   // pulseFrames is a no-op under SCK — frames stream at 50fps already
   pulseFrames = () => {};
-  return true;
 }
 
 function stopCapture() {
@@ -191,6 +218,7 @@ function stopCapture() {
   }
   capture?.stop();
   capture = null;
+  lastCaptureMeta = null;
   if (activeTransport === 'capturekit') {
     activeTransport = 'none';
     lastMeta = null;
@@ -215,13 +243,20 @@ function scheduleCaptureRestart(reason: string) {
   console.log(`[bridge] restarting ScreenCaptureKit after stream stop: ${reason}`);
   captureRestartTimer = setTimeout(() => {
     captureRestartTimer = null;
-    if (!caps.booted || activeTransport !== 'none') return;
-    if (!startCaptureKit()) startScreenshots();
+    if (!caps.booted || capture) return;
+    const activate = activeTransport !== 'screenshot';
+    if (!startCaptureKit(activate) && !screenshotLoop) startScreenshots();
   }, CAPTURE_RESTART_DELAY_MS);
 }
 
 function startScreenshots() {
-  if (!caps.simctl || !caps.booted || screenshotLoop) return;
+  if (!caps.simctl || !caps.booted) return;
+  if (screenshotLoop) {
+    activeTransport = 'screenshot';
+    if (lastMeta?.type === 'frame:meta' && lastMeta.source === 'screenshot') broadcastJson(lastMeta);
+    pulseFrames = screenshotLoop.pulse;
+    return;
+  }
   console.log(`[bridge] starting ${FRAME_FORMAT} screenshot loop @ ${FRAME_MS}ms for ${caps.udid ?? 'booted'}`);
   const loop = startScreenshotLoop(
     FRAME_MS,
@@ -318,7 +353,9 @@ async function handleMessage(ws: WS, raw: RawData) {
         selectedUdid = msg.udid;
         caps = await detectCapabilities(selectedUdid);
         selectedUdid = caps.udid;
-        switchTransport(activeTransport === 'capturekit' ? 'capturekit' : 'screenshot');
+        const previousTransport = activeTransport;
+        stopCapture();
+        switchTransport(previousTransport === 'capturekit' ? 'capturekit' : 'screenshot');
         ensureVideoRunning();
         broadcastJson(hello());
         void refreshAll();

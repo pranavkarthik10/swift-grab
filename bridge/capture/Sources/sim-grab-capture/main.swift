@@ -34,6 +34,8 @@ import os
 let FPS: Int = Int(ProcessInfo.processInfo.environment["CAPTURE_FPS"] ?? "") ?? 50
 let QUALITY: Double = Double(ProcessInfo.processInfo.environment["CAPTURE_QUALITY"] ?? "") ?? 0.7
 let MAX_WIDTH: Int = Int(ProcessInfo.processInfo.environment["CAPTURE_MAX_WIDTH"] ?? "") ?? 1200
+let WINDOW_ATTEMPTS: Int = Int(ProcessInfo.processInfo.environment["CAPTURE_WINDOW_ATTEMPTS"] ?? "") ?? 40
+let WINDOW_RETRY_MS: Int = Int(ProcessInfo.processInfo.environment["CAPTURE_WINDOW_RETRY_MS"] ?? "") ?? 100
 
 let SIM_BUNDLE_IDS: Set<String> = [
     "com.apple.iphonesimulator",
@@ -97,7 +99,7 @@ final class Capture: NSObject, SCStreamDelegate, SCStreamOutput, @unchecked Send
     // Find the simulator window, retrying a few times so we don't race the user
     // booting a sim right after the bridge starts.
     func findWindow() async throws -> SCWindow {
-        for attempt in 1...12 {
+        for attempt in 1...WINDOW_ATTEMPTS {
             let content: SCShareableContent
             do {
                 content = try await SCShareableContent.excludingDesktopWindows(
@@ -117,8 +119,8 @@ final class Capture: NSObject, SCStreamDelegate, SCStreamOutput, @unchecked Send
                     return w
                 }
             }
-            logErr("capture:waiting-for-window attempt=\(attempt)/12")
-            try await Task.sleep(nanoseconds: 1_000_000_000)
+            logErr("capture:waiting-for-window attempt=\(attempt)/\(WINDOW_ATTEMPTS)")
+            try await Task.sleep(nanoseconds: UInt64(max(10, WINDOW_RETRY_MS)) * 1_000_000)
         }
         throw NSError(
             domain: "sim-grab-capture", code: 1,
