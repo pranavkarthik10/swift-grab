@@ -1,10 +1,10 @@
 # sim-grab
 
-`sim-grab` turns the iOS Simulator into something an agent can actually work with.
+`sim-grab` streams the iOS Simulator into the browser, easily accessible from coding agent apps like Cursor, Codex, Claude, and many more. It also exposes the accessibility tree as an inspector, letting you select elements via hover to provide as context for your changes.
 
-Run one command, open a browser tab, mirror the simulator live, and inspect the screen with real accessibility metadata: labels, roles, frames, ancestor chains, and point-level refinement when the accessibility tree is too coarse. It is built for coding workflows where you want an AI assistant to understand a running app without adding instrumentation to the app.
+Run one command, open a browser tab, mirror the simulator live, and inspect the screen with real accessibility metadata: labels, roles, frames, ancestor chains, and point-level refinement when the accessibility tree is too coarse.
 
-It works with SwiftUI, UIKit, React Native, Flutter, and anything else that exposes accessibility data inside the simulator.
+It works with SwiftUI, UIKit, React Native, Flutter, and anything else that exposes accessibility data inside the simulator. It also includes any part of the simulator including iOS, system apps, and more.
 
 ![Demo](https://raw.githubusercontent.com/pranavkarthik10/sim-grab/main/demo.png)
 
